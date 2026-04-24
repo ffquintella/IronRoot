@@ -1,0 +1,9 @@
+[package]
+name = "ironroot-web-app"
+version = "0.1.0"
+edition = "2021"
+description = "IronRoot web application template"
+
+# TODO: Add ironroot-web dependency once published to crates.io
+# [dependencies]
+# ironroot-web = "0.1"

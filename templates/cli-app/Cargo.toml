@@ -1,0 +1,9 @@
+[package]
+name = "ironroot-cli-app"
+version = "0.1.0"
+edition = "2021"
+description = "IronRoot CLI application template"
+
+# TODO: Add ironroot-cli dependency once published to crates.io
+# [dependencies]
+# ironroot-cli = "0.1"

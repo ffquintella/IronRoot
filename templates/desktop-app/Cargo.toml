@@ -1,0 +1,13 @@
+[package]
+name = "ironroot-desktop-app"
+version = "0.1.0"
+edition = "2021"
+description = "IronRoot desktop application template"
+
+# TODO: Add ironroot-gui dependency once published to crates.io
+# [dependencies]
+# ironroot-gui = "0.1"
+
+# Future feature flags (choose one):
+# ironroot-gui = { version = "0.1", features = ["egui"] }
+# ironroot-gui = { version = "0.1", features = ["tauri"] }

@@ -1,0 +1,10 @@
+[package]
+name = "ironroot-mcp-example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Example MCP server for the IronRoot framework"
+
+[[bin]]
+name = "ironroot-mcp-example"
+path = "src/main.rs"

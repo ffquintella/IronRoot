@@ -1,0 +1,9 @@
+[package]
+name = "ironroot-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Web layer abstractions for the IronRoot framework"
+
+[dependencies]
+ironroot-core = { path = "../core" }

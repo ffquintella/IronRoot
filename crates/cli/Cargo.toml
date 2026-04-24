@@ -1,0 +1,9 @@
+[package]
+name = "ironroot-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI abstraction layer for the IronRoot framework"
+
+[dependencies]
+ironroot-core = { path = "../core" }
