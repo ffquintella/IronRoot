@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/macros",
+    "crates/web",
+    "crates/cli",
+    "crates/gui",
+    "mcp/servers/example_server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ffquintella/IronRoot"
+authors = ["IronRoot Contributors"]
+
+[workspace.dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }

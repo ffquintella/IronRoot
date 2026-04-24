@@ -1,0 +1,6 @@
+[package]
+name = "ironroot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core traits and abstractions for the IronRoot framework"
