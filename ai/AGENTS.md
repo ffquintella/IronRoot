@@ -52,7 +52,10 @@ If `unsafe` is necessary, it must be:
 
 ### 4. OOP Helper Crates
 
-The `classes` crate and `inherit-methods-macro` crate enable class-like programming patterns in Rust. When used:
+The external [`classes`](https://crates.io/crates/classes) crate and
+[`inherit-methods-macro`](https://crates.io/crates/inherit-methods-macro) crate enable
+class-like programming patterns in Rust. They are **not bundled with IronRoot** — add
+them to your own project's `[dependencies]` if needed. When used:
 
 - **Document** every usage with a comment explaining *why* the OOP pattern is preferred over a plain trait.
 - **Limit scope** — OOP helpers belong in implementation details, not public APIs.

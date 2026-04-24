@@ -31,7 +31,11 @@ IronRoot is structured around a layered architecture that separates concerns int
 
 - Defines foundational traits (`Entity`, `Service`) used across all other crates.
 - Intentionally lightweight — no async runtime, no I/O.
-- OOP helpers (`classes` crate, `inherit-methods-macro`) may be used *optionally* inside this crate but must be clearly documented.
+- OOP helpers (the external [`classes`](https://crates.io/crates/classes) crate and
+  [`inherit-methods-macro`](https://crates.io/crates/inherit-methods-macro)) may be
+  added as *optional* `[dependencies]` by consumers of this crate when class-like
+  patterns are preferred, but they are **not bundled with IronRoot**. Any usage must
+  be clearly documented.
 
 ### `ironroot-macros`
 
@@ -75,9 +79,11 @@ IronRoot takes a **traits-first** approach to object-oriented patterns:
 1. **Traits** are the primary abstraction mechanism.
 2. **Generics and associated types** encode polymorphism without virtual dispatch overhead.
 3. **Dynamic dispatch (`dyn Trait`)** is used only at crate boundaries or when heterogeneous collections are required.
-4. **Helper crates** (`classes`, `inherit-methods-macro`) provide ergonomic shortcuts for class-like patterns and method inheritance but are *optional extensions*, not core requirements.
-
-Using OOP helpers must be justified and documented in the module where they appear.
+4. **External helper crates** — the [`classes`](https://crates.io/crates/classes) crate
+   and [`inherit-methods-macro`](https://crates.io/crates/inherit-methods-macro) provide
+   ergonomic shortcuts for class-like patterns and method inheritance. They are **not**
+   bundled with IronRoot; add them to your own `[dependencies]` when needed. Any usage
+   must be justified and documented in the module where they appear.
 
 ---
 
