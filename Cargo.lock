@@ -4,25 +4,25 @@ version = 4
 
 [[package]]
 name = "ironroot-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ironroot-core",
 ]
 
 [[package]]
 name = "ironroot-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "ironroot-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ironroot-core",
 ]
 
 [[package]]
 name = "ironroot-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -31,11 +31,15 @@ dependencies = [
 
 [[package]]
 name = "ironroot-mcp-example"
-version = "0.1.0"
+version = "0.2.0"
+
+[[package]]
+name = "ironroot-new"
+version = "0.2.0"
 
 [[package]]
 name = "ironroot-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ironroot-core",
 ]

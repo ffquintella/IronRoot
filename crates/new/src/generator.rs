@@ -1,0 +1,666 @@
+//! File-tree generation for a bootstrapped IronRoot project.
+
+use std::fs;
+use std::io;
+use std::path::Path;
+
+use crate::config::{Frontend, Gui, ProjectConfig, ProjectKind};
+
+pub fn generate(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
+    fs::create_dir_all(root)?;
+
+    write(root, ".gitignore", &gitignore())?;
+    write(root, "README.md", &readme(cfg))?;
+    write(root, "Makefile", &makefile(cfg))?;
+    write(root, "AGENTS.md", &agents_md(cfg))?;
+    write(root, "rust-toolchain.toml", RUST_TOOLCHAIN)?;
+    write(root, ".env.example", &env_example(cfg))?;
+
+    match cfg.kind {
+        ProjectKind::ClientTool => scaffold_cli(cfg, root)?,
+        ProjectKind::WebApp => scaffold_webapp(cfg, root)?,
+        ProjectKind::ClientServer => scaffold_client_server(cfg, root)?,
+    }
+
+    if let Some(frontend) = cfg.frontend {
+        scaffold_frontend(frontend, root)?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Scaffolds
+// ---------------------------------------------------------------------------
+
+fn scaffold_cli(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
+    write(root, "Cargo.toml", &single_cargo_toml(cfg, "bin"))?;
+    let src = root.join("src");
+    fs::create_dir_all(&src)?;
+    write(&src, "main.rs", &cli_main_rs(cfg))?;
+    let tests = root.join("tests");
+    fs::create_dir_all(&tests)?;
+    write(&tests, "smoke.rs", CLI_SMOKE_TEST)?;
+    Ok(())
+}
+
+fn scaffold_webapp(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
+    write(root, "Cargo.toml", &single_cargo_toml(cfg, "bin"))?;
+    let src = root.join("src");
+    fs::create_dir_all(&src)?;
+    write(&src, "main.rs", &webapp_main_rs(cfg))?;
+    let tests = root.join("tests");
+    fs::create_dir_all(&tests)?;
+    write(&tests, "smoke.rs", WEBAPP_SMOKE_TEST)?;
+    Ok(())
+}
+
+fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
+    // Workspace with `server/` and `client/` members.
+    write(root, "Cargo.toml", &workspace_cargo_toml(cfg))?;
+
+    // server
+    let server = root.join("server");
+    fs::create_dir_all(server.join("src"))?;
+    fs::create_dir_all(server.join("tests"))?;
+    write(&server, "Cargo.toml", &server_cargo_toml(cfg))?;
+    write(&server.join("src"), "main.rs", &webapp_main_rs(cfg))?;
+    write(&server.join("tests"), "smoke.rs", WEBAPP_SMOKE_TEST)?;
+
+    // client
+    let client = root.join("client");
+    fs::create_dir_all(client.join("src"))?;
+    fs::create_dir_all(client.join("tests"))?;
+    write(&client, "Cargo.toml", &client_cargo_toml(cfg))?;
+    let gui = cfg.gui.expect("client/server must have a gui");
+    write(&client.join("src"), "main.rs", &client_main_rs(gui, &cfg.name))?;
+    write(&client.join("tests"), "smoke.rs", CLIENT_SMOKE_TEST)?;
+    Ok(())
+}
+
+fn scaffold_frontend(frontend: Frontend, root: &Path) -> io::Result<()> {
+    let dir = root.join(frontend.dir_name());
+    fs::create_dir_all(&dir)?;
+    match frontend {
+        Frontend::React => {
+            write(&dir, "README.md", REACT_README)?;
+            write(&dir, "package.json", REACT_PACKAGE_JSON)?;
+            write(&dir, "index.html", REACT_INDEX_HTML)?;
+            let src = dir.join("src");
+            fs::create_dir_all(&src)?;
+            write(&src, "main.tsx", REACT_MAIN_TSX)?;
+            write(&src, "App.tsx", REACT_APP_TSX)?;
+        }
+        Frontend::Angular => {
+            write(&dir, "README.md", ANGULAR_README)?;
+            write(&dir, "package.json", ANGULAR_PACKAGE_JSON)?;
+            let src = dir.join("src");
+            fs::create_dir_all(&src)?;
+            write(&src, "main.ts", ANGULAR_MAIN_TS)?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Cargo.toml renderers
+// ---------------------------------------------------------------------------
+
+fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
+    let mut deps = String::new();
+    if matches!(cfg.kind, ProjectKind::WebApp) {
+        deps.push_str("axum = \"0.7\"\n");
+        deps.push_str("tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n");
+        deps.push_str("tracing = \"0.1\"\n");
+        deps.push_str("tracing-subscriber = \"0.3\"\n");
+    }
+    if let Some(feat) = cfg.database.sqlx_feature() {
+        deps.push_str(&format!(
+            "sqlx = {{ version = \"0.7\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+        ));
+    }
+    let bin_section = if kind == "bin" {
+        format!("\n[[bin]]\nname = \"{}\"\npath = \"src/main.rs\"\n", cfg.name)
+    } else {
+        String::new()
+    };
+    format!(
+        r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2021"
+description = "Bootstrapped by ironroot-new"
+{bin_section}
+[dependencies]
+{deps}
+[dev-dependencies]
+"#,
+        name = cfg.name,
+    )
+}
+
+fn workspace_cargo_toml(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"[workspace]
+resolver = "2"
+members = ["server", "client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+description = "Bootstrapped by ironroot-new ({name})"
+"#,
+        name = cfg.name,
+    )
+}
+
+fn server_cargo_toml(cfg: &ProjectConfig) -> String {
+    let mut deps = String::from(
+        "axum = \"0.7\"\n\
+         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n\
+         tracing = \"0.1\"\n\
+         tracing-subscriber = \"0.3\"\n",
+    );
+    if let Some(feat) = cfg.database.sqlx_feature() {
+        deps.push_str(&format!(
+            "sqlx = {{ version = \"0.7\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+        ));
+    }
+    format!(
+        r#"[package]
+name = "{name}-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "{name}-server"
+path = "src/main.rs"
+
+[dependencies]
+{deps}
+"#,
+        name = cfg.name,
+    )
+}
+
+fn client_cargo_toml(cfg: &ProjectConfig) -> String {
+    let gui = cfg.gui.expect("client/server must have a gui");
+    let deps = match gui {
+        Gui::Egui => {
+            "eframe = \"0.27\"\negui = \"0.27\"\n".to_string()
+        }
+        Gui::Tauri => {
+            // Minimal placeholder; real Tauri projects need additional setup.
+            "tauri = { version = \"2\", features = [] }\n\
+             serde = { version = \"1\", features = [\"derive\"] }\n\
+             serde_json = \"1\"\n"
+                .to_string()
+        }
+    };
+    format!(
+        r#"[package]
+name = "{name}-client"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "{name}-client"
+path = "src/main.rs"
+
+[dependencies]
+{deps}
+"#,
+        name = cfg.name,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Source file renderers
+// ---------------------------------------------------------------------------
+
+fn cli_main_rs(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"//! `{name}` — CLI bootstrapped by ironroot-new.
+
+fn main() {{
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {{
+        println!("{name} v{{}}", env!("CARGO_PKG_VERSION"));
+        println!("usage: {name} <command> [args...]");
+        return;
+    }}
+    match args[0].as_str() {{
+        "hello" => println!("hello, {{}}!", args.get(1).map(String::as_str).unwrap_or("world")),
+        other => eprintln!("unknown command: {{other}}"),
+    }}
+}}
+
+pub fn add(a: i64, b: i64) -> i64 {{
+    a + b
+}}
+
+#[cfg(test)]
+mod tests {{
+    use super::*;
+
+    #[test]
+    fn add_works() {{
+        assert_eq!(add(2, 3), 5);
+    }}
+}}
+"#,
+        name = cfg.name,
+    )
+}
+
+fn webapp_main_rs(_cfg: &ProjectConfig) -> String {
+    r#"//! HTTP server bootstrapped by ironroot-new.
+
+use axum::{routing::get, Router};
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
+
+    let app = Router::new().route("/", get(root)).route("/health", get(health));
+
+    let addr = "0.0.0.0:3000";
+    tracing::info!("listening on {addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn root() -> &'static str {
+    "ok"
+}
+
+async fn health() -> &'static str {
+    "healthy"
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn health_returns_healthy() {
+        assert_eq!(super::health().await, "healthy");
+    }
+}
+"#
+    .to_string()
+}
+
+fn client_main_rs(gui: Gui, name: &str) -> String {
+    match gui {
+        Gui::Egui => format!(
+            r#"//! `{name}` desktop client (egui).
+
+use eframe::egui;
+
+fn main() -> Result<(), eframe::Error> {{
+    let options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "{name}",
+        options,
+        Box::new(|_cc| Box::<App>::default()),
+    )
+}}
+
+#[derive(Default)]
+struct App {{
+    name: String,
+}}
+
+impl eframe::App for App {{
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {{
+        egui::CentralPanel::default().show(ctx, |ui| {{
+            ui.heading("Hello from {name}");
+            ui.horizontal(|ui| {{
+                ui.label("Your name:");
+                ui.text_edit_singleline(&mut self.name);
+            }});
+            if ui.button("Greet").clicked() {{
+                println!("Hello, {{}}!", self.name);
+            }}
+        }});
+    }}
+}}
+"#,
+        ),
+        Gui::Tauri => format!(
+            r#"//! `{name}` desktop client (Tauri).
+//!
+//! NOTE: a real Tauri project requires `tauri.conf.json`, icons, and a
+//! frontend build step. This file is a minimal placeholder; see
+//! https://tauri.app for the full setup guide.
+
+fn main() {{
+    println!("This is a placeholder. Run `cargo tauri init` inside this crate");
+    println!("to generate `tauri.conf.json`, then wire it up to the frontend/ dir.");
+}}
+"#,
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Static file blobs
+// ---------------------------------------------------------------------------
+
+const RUST_TOOLCHAIN: &str = r#"[toolchain]
+channel = "stable"
+"#;
+
+const CLI_SMOKE_TEST: &str = r#"//! Smoke test — the binary should build and the basic helper works.
+
+#[test]
+fn smoke() {
+    assert_eq!(2 + 2, 4);
+}
+"#;
+
+const WEBAPP_SMOKE_TEST: &str = r#"//! Smoke test placeholder for the HTTP server.
+
+#[test]
+fn smoke() {
+    assert!(true, "replace with a real handler test");
+}
+"#;
+
+const CLIENT_SMOKE_TEST: &str = r#"//! Smoke test placeholder for the desktop client.
+
+#[test]
+fn smoke() {
+    assert!(true, "replace with a real UI/state test");
+}
+"#;
+
+fn gitignore() -> String {
+    r#"/target
+**/*.rs.bk
+Cargo.lock
+.env
+.DS_Store
+
+# frontend
+node_modules
+dist
+.vite
+.angular
+"#
+    .to_string()
+}
+
+fn env_example(cfg: &ProjectConfig) -> String {
+    let mut out = String::from("# Copy to `.env` and fill in real values.\n");
+    if let Some(url) = cfg.database.default_url() {
+        out.push_str(&format!("DATABASE_URL={url}\n"));
+    }
+    if matches!(cfg.kind, ProjectKind::WebApp | ProjectKind::ClientServer) {
+        out.push_str("RUST_LOG=info\n");
+        out.push_str("BIND_ADDR=0.0.0.0:3000\n");
+    }
+    out
+}
+
+fn makefile(cfg: &ProjectConfig) -> String {
+    let has_frontend = cfg.frontend.is_some();
+    let frontend_section = if has_frontend {
+        r#"
+.PHONY: frontend-install frontend-dev frontend-build
+frontend-install:
+	cd frontend && npm install
+frontend-dev:
+	cd frontend && npm run dev
+frontend-build:
+	cd frontend && npm run build
+"#
+    } else {
+        ""
+    };
+
+    format!(
+        r#".PHONY: build test run fmt lint check clean
+
+build:
+	cargo build --workspace
+
+test:
+	cargo test --workspace
+
+run:
+	cargo run
+
+fmt:
+	cargo fmt --all
+
+lint:
+	cargo clippy --workspace --all-targets -- -D warnings
+
+check:
+	cargo check --workspace --all-targets
+
+clean:
+	cargo clean
+{frontend_section}"#,
+    )
+}
+
+fn readme(cfg: &ProjectConfig) -> String {
+    let mut layout = String::new();
+    match cfg.kind {
+        ProjectKind::ClientTool => layout.push_str("- `src/` — CLI entrypoint\n"),
+        ProjectKind::WebApp => {
+            layout.push_str("- `src/` — HTTP server entrypoint (axum)\n");
+        }
+        ProjectKind::ClientServer => {
+            layout.push_str("- `server/` — HTTP server (axum)\n");
+            layout.push_str("- `client/` — desktop GUI client\n");
+        }
+    }
+    if cfg.frontend.is_some() {
+        layout.push_str("- `frontend/` — JS/TS frontend\n");
+    }
+
+    format!(
+        r#"# {name}
+
+Bootstrapped by **ironroot-new**.
+
+## Stack
+
+- Project kind : {kind}
+{gui_line}{frontend_line}- Database     : {db}
+
+## Layout
+
+{layout}
+## Quickstart
+
+```bash
+make build
+make test
+make run
+```
+
+See [AGENTS.md](AGENTS.md) for AI-assistant guidance.
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+        gui_line = cfg
+            .gui
+            .map(|g| format!("- GUI         : {}\n", g.label()))
+            .unwrap_or_default(),
+        frontend_line = cfg
+            .frontend
+            .map(|f| format!("- Frontend    : {}\n", f.label()))
+            .unwrap_or_default(),
+        db = cfg.database.label(),
+    )
+}
+
+fn agents_md(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# AI Agent Instructions — {name}
+
+This project was scaffolded by `ironroot-new`. AI assistants working on it
+should follow the conventions below in addition to the upstream
+[IronRoot AGENTS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/AGENTS.md).
+
+## Project shape
+
+- Kind     : {kind}
+{gui_line}{frontend_line}- Database : {db}
+
+## House rules
+
+1. **Prefer composition over inheritance** — use traits and generics; avoid
+   deep type hierarchies.
+2. **Keep `main.rs` thin** — wire dependencies and delegate to library code.
+3. **One concern per module.** Domain logic and I/O do not mix.
+4. **No silent breaking changes.** Bump versions, mark deprecations.
+5. **Document every public item** with `///` doc comments.
+6. **Tests are non-optional.** Every new feature ships with at least one test.
+7. **`unsafe` is forbidden** unless justified inline with a `// SAFETY:` note.
+
+## Workflow
+
+- `make fmt`   — format the workspace.
+- `make lint`  — run clippy with `-D warnings`.
+- `make test`  — run the full test suite.
+- Update this file whenever a new convention is agreed.
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+        gui_line = cfg
+            .gui
+            .map(|g| format!("- GUI      : {}\n", g.label()))
+            .unwrap_or_default(),
+        frontend_line = cfg
+            .frontend
+            .map(|f| format!("- Frontend : {}\n", f.label()))
+            .unwrap_or_default(),
+        db = cfg.database.label(),
+    )
+}
+
+// --- frontend blobs --------------------------------------------------------
+
+const REACT_README: &str = r#"# Frontend (React + Vite + TypeScript)
+
+```bash
+npm install
+npm run dev      # start dev server
+npm run build    # produce production bundle into dist/
+```
+"#;
+
+const REACT_PACKAGE_JSON: &str = r#"{
+  "name": "frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.4"
+  }
+}
+"#;
+
+const REACT_INDEX_HTML: &str = r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+"#;
+
+const REACT_MAIN_TSX: &str = r#"import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+"#;
+
+const REACT_APP_TSX: &str = r#"export default function App() {
+  return <h1>Hello from React</h1>;
+}
+"#;
+
+const ANGULAR_README: &str = r#"# Frontend (Angular)
+
+```bash
+npm install
+npm start        # ng serve
+npm run build    # production bundle
+```
+
+Run `npx ng new` if you prefer the official CLI scaffold instead of this
+minimal placeholder.
+"#;
+
+const ANGULAR_PACKAGE_JSON: &str = r#"{
+  "name": "frontend",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "ng serve",
+    "build": "ng build",
+    "test": "ng test"
+  },
+  "dependencies": {
+    "@angular/animations": "^18.0.0",
+    "@angular/common": "^18.0.0",
+    "@angular/compiler": "^18.0.0",
+    "@angular/core": "^18.0.0",
+    "@angular/forms": "^18.0.0",
+    "@angular/platform-browser": "^18.0.0",
+    "@angular/platform-browser-dynamic": "^18.0.0",
+    "@angular/router": "^18.0.0",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0",
+    "zone.js": "~0.14.3"
+  },
+  "devDependencies": {
+    "@angular/cli": "^18.0.0",
+    "@angular/compiler-cli": "^18.0.0",
+    "typescript": "~5.5.0"
+  }
+}
+"#;
+
+const ANGULAR_MAIN_TS: &str = r#"// Placeholder entrypoint. For a real app, generate one with `npx ng new`.
+console.log("Hello from Angular");
+"#;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn write(dir: &Path, name: &str, contents: &str) -> io::Result<()> {
+    let path = dir.join(name);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)
+}
