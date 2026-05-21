@@ -135,6 +135,20 @@ let _guard = ironroot_log::init_default("my-app")?;
 tracing::info!("ready");
 ```
 
+### `ironroot-dal`
+
+Data Access Layer built on `sqlx`. Routes database access between SQLite and
+MySQL by default (PostgreSQL behind the `postgres` feature) — the backend is
+selected from the connection-URL scheme at runtime.
+
+```rust
+use ironroot_dal::Pool;
+
+let pool = Pool::connect("sqlite::memory:").await?;
+// or: Pool::connect("mysql://user:pw@host:3306/app").await?;
+pool.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await?;
+```
+
 ---
 
 ## Documentation

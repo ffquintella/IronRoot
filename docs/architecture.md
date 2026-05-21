@@ -66,6 +66,17 @@ IronRoot is structured around a layered architecture that separates concerns int
 - Optional syslog export (`syslog` feature) — Unix socket or remote UDP.
 - Exposes a `LogConfig` builder and a one-call `init_default(app_name)` shortcut.
 
+### `ironroot-dal`
+
+- Data Access Layer built on `sqlx`.
+- Routes database access between backends at runtime: **SQLite** and **MySQL**
+  are enabled by default; **PostgreSQL** is available behind the `postgres`
+  feature flag.
+- Backend is selected from the connection-URL scheme (`sqlite:`, `mysql:`,
+  `postgres:`) — no recompilation required to switch.
+- Exposes a `Pool` enum for raw query execution and a `Repository` trait for
+  uniform CRUD-style access over domain types.
+
 ---
 
 ## Macro System
@@ -104,6 +115,7 @@ IronRoot takes a **traits-first** approach to object-oriented patterns:
 | `ironroot-cli` | `ironroot-core` |
 | `ironroot-gui` | `ironroot-core` |
 | `ironroot-log` | `tracing`, `tracing-subscriber`, `tracing-appender`, `file-rotate`, `syslog` (optional) |
+| `ironroot-dal` | `sqlx` (sqlite + mysql by default, postgres optional), `async-trait`, `thiserror`, `tracing` |
 | Templates | Any of the above crates |
 
 No crate in `crates/` may depend on a `templates/` project.

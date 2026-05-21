@@ -1,0 +1,21 @@
+[package]
+name = "ironroot-dal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Data Access Layer for IronRoot — routes between SQLite and MySQL backends"
+
+[features]
+default = ["sqlite", "mysql"]
+sqlite = ["sqlx/sqlite"]
+mysql = ["sqlx/mysql"]
+postgres = ["sqlx/postgres"]
+
+[dependencies]
+sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio-rustls", "macros", "any"] }
+async-trait = "0.1"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
