@@ -193,8 +193,24 @@ let _verified = svc.verify(&Credentials {
 
 ## Documentation
 
+The `docs/` folder is a [docsify](https://docsify.js.org) site — plain
+Markdown rendered live in the browser, no build step. Serve it locally:
+
+```bash
+make docs              # → http://localhost:3000
+# or directly:
+./docs/serve_docs.sh   # Unix
+docs\serve_docs.bat    # Windows
+```
+
+Both scripts prefer `docsify-cli` (`npm i -g docsify-cli`) and fall back to
+Python's `http.server` if Node isn't available.
+
+Direct file links (also browsable on GitHub):
+
 - [Architecture](docs/architecture.md) — layered design, crate responsibilities, macro system
 - [Roadmap](docs/roadmap.md) — phased development plan
+- Per-crate docs under [`docs/crates/`](docs/crates/) (one page per crate)
 - [AI Agents](ai/AGENTS.md) — conventions for AI-assisted development
 - [Extension Guide](ai/INSTRUCTIONS.md) — how to add crates, macros, and templates
 - [MCP Integration](mcp/README.md) — Model Context Protocol server scaffolding
