@@ -1,0 +1,31 @@
+[package]
+name = "ironroot-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Authentication primitives for IronRoot — Argon2id password hashing with optional ML-KEM (post-quantum) sealing"
+
+[features]
+default = ["dal", "pq-seal"]
+# Integrate with ironroot-dal for a SQL-backed user repository.
+dal = ["dep:ironroot-dal"]
+# Enable post-quantum sealing of stored password hashes (ML-KEM-768 + ChaCha20-Poly1305).
+pq-seal = ["dep:ml-kem", "dep:chacha20poly1305", "dep:sha2"]
+
+[dependencies]
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["std"] }
+rand_core = { version = "0.6", features = ["std"] }
+rand = "0.8"
+thiserror = "1"
+async-trait = "0.1"
+tracing = "0.1"
+
+# Optional, behind feature flags.
+ironroot-dal = { path = "../dal", optional = true }
+ml-kem = { version = "0.2", optional = true }
+chacha20poly1305 = { version = "0.10", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

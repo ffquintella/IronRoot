@@ -1,0 +1,25 @@
+[package]
+name = "ironroot-dal-hiqlite"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-dal"
+
+# This crate is intentionally NOT a member of the main IronRoot workspace —
+# see the top-level Cargo.toml comment for why. It depends on `ironroot-dal`
+# via a path dependency with `default-features = false` so that sqlx-sqlite
+# does NOT enter the dependency graph; both link `libsqlite3-sys` and Cargo
+# would otherwise refuse to resolve.
+
+# NOTE: we deliberately do NOT depend on `ironroot-dal` here, even though
+# semantically we'd love to share its `DalError` / `ExecResult` types.
+# Cargo's resolver considers all features of a path dep up-front and flags
+# the conflict between `sqlx-sqlite` (reachable via ironroot-dal's `sqlite`
+# feature, even when not activated) and `rusqlite` (pulled in by hiqlite)
+# because both declare `links = "sqlite3"`. Duplicating the small Error /
+# ExecResult shapes is the pragmatic workaround.
+
+[dependencies]
+hiqlite = { version = "0.13", default-features = false, features = ["sqlite"] }
+thiserror = "1"
+tracing = "0.1"

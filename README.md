@@ -149,6 +149,46 @@ let pool = Pool::connect("sqlite::memory:").await?;
 pool.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)").await?;
 ```
 
+### `ironroot-dal-hiqlite` *(standalone)*
+
+Optional integration with [hiqlite](https://crates.io/crates/hiqlite) for
+Raft-backed embedded SQLite. Lives at `crates/dal-hiqlite/` and is built
+independently from the main workspace — see its [README](crates/dal-hiqlite/README.md)
+for why.
+
+### `ironroot-auth`
+
+Authentication primitives — `User` entities, `Credentials`, `AuthService` —
+with **Argon2id** password hashing (post-quantum-secure as a memory-hard
+symmetric KDF). The optional `pq-seal` feature additionally wraps stored
+hashes in an authenticated envelope using **ML-KEM-768** (NIST FIPS 203,
+ex-Kyber) + ChaCha20-Poly1305 for a named PQ-cryptography layer at rest.
+The optional `dal` feature ships a `SqlUserRepository` backed by `ironroot-dal`.
+
+```rust
+use ironroot_auth::{AuthService, NewUser, Credentials, SqlUserRepository, PqSealer};
+use ironroot_dal::Pool;
+use std::sync::Arc;
+
+let pool = Pool::connect("sqlite::memory:").await?;
+let repo = SqlUserRepository::new(pool);
+repo.ensure_schema().await?;
+
+let svc = AuthService::new(repo)
+    .with_pq_sealer(Arc::new(PqSealer::generate())); // optional PQ layer
+
+let _user = svc.register(NewUser {
+    username: "ada".into(),
+    email: "ada@example.org".into(),
+    password: "correct horse battery staple".into(),
+}).await?;
+
+let _verified = svc.verify(&Credentials {
+    username: "ada".into(),
+    password: "correct horse battery staple".into(),
+}).await?;
+```
+
 ---
 
 ## Documentation

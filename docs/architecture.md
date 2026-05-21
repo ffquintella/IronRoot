@@ -77,6 +77,30 @@ IronRoot is structured around a layered architecture that separates concerns int
 - Exposes a `Pool` enum for raw query execution and a `Repository` trait for
   uniform CRUD-style access over domain types.
 
+### `ironroot-dal-hiqlite` *(standalone, not a workspace member)*
+
+- Optional integration with [hiqlite](https://crates.io/crates/hiqlite), a
+  Raft-backed embedded SQLite for highly-available deployments.
+- Exposed as a separate `HiqlitePool` wrapper rather than a `Pool` variant
+  because hiqlite's `Row<'_>` carries a lifetime that doesn't compose with
+  the lifetime-free `Row` used by the rest of `ironroot-dal`.
+- Lives in `crates/dal-hiqlite/` but is **excluded** from the workspace
+  because hiqlite (via `rusqlite`) and `sqlx-sqlite` both link the
+  `sqlite3` native library and Cargo refuses to resolve a graph with both.
+  Build it standalone with `cargo build` from `crates/dal-hiqlite/`.
+
+### `ironroot-auth`
+
+- Authentication primitives: `User`, `Credentials`, `NewUser`,
+  `PasswordHasher`, `AuthService`.
+- **Argon2id** for password hashing — already post-quantum-secure as a
+  memory-hard symmetric KDF.
+- Optional `pq-seal` feature: wraps stored Argon2id PHC strings in an
+  authenticated envelope using **ML-KEM-768** (NIST FIPS 203) for key
+  encapsulation and **ChaCha20-Poly1305** for AEAD, giving a named PQ layer
+  at rest.
+- Optional `dal` feature: `SqlUserRepository` backed by `ironroot-dal`.
+
 ---
 
 ## Macro System
@@ -116,6 +140,8 @@ IronRoot takes a **traits-first** approach to object-oriented patterns:
 | `ironroot-gui` | `ironroot-core` |
 | `ironroot-log` | `tracing`, `tracing-subscriber`, `tracing-appender`, `file-rotate`, `syslog` (optional) |
 | `ironroot-dal` | `sqlx` (sqlite + mysql by default, postgres optional), `async-trait`, `thiserror`, `tracing` |
+| `ironroot-dal-hiqlite` | `hiqlite`, `thiserror`, `tracing` (standalone — not a workspace member) |
+| `ironroot-auth` | `argon2`, `password-hash`, `rand`, `thiserror`, `async-trait`; optional `ironroot-dal`, `ml-kem`, `chacha20poly1305`, `sha2` |
 | Templates | Any of the above crates |
 
 No crate in `crates/` may depend on a `templates/` project.
