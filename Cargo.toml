@@ -6,6 +6,7 @@ members = [
     "crates/web",
     "crates/cli",
     "crates/gui",
+    "crates/log",
     "crates/new",
     "mcp/servers/example_server",
 ]

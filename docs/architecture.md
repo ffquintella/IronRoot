@@ -59,6 +59,13 @@ IronRoot is structured around a layered architecture that separates concerns int
 - *(Planned)* Desktop UI integration.
 - Will support Tauri (web-based) and/or egui (immediate-mode) via feature flags.
 
+### `ironroot-log`
+
+- Default logging facade built on `tracing`.
+- Size-based file rotation (10 MB default, 5 retained files).
+- Optional syslog export (`syslog` feature) — Unix socket or remote UDP.
+- Exposes a `LogConfig` builder and a one-call `init_default(app_name)` shortcut.
+
 ---
 
 ## Macro System
@@ -96,6 +103,7 @@ IronRoot takes a **traits-first** approach to object-oriented patterns:
 | `ironroot-web` | `ironroot-core` |
 | `ironroot-cli` | `ironroot-core` |
 | `ironroot-gui` | `ironroot-core` |
+| `ironroot-log` | `tracing`, `tracing-subscriber`, `tracing-appender`, `file-rotate`, `syslog` (optional) |
 | Templates | Any of the above crates |
 
 No crate in `crates/` may depend on a `templates/` project.

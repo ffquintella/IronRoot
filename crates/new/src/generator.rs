@@ -111,8 +111,9 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
     if matches!(cfg.kind, ProjectKind::WebApp) {
         deps.push_str("axum = \"0.7\"\n");
         deps.push_str("tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n");
-        deps.push_str("tracing = \"0.1\"\n");
-        deps.push_str("tracing-subscriber = \"0.3\"\n");
+        deps.push_str(LOGGING_DEPS);
+    } else if matches!(cfg.kind, ProjectKind::ClientTool) {
+        deps.push_str(LOGGING_DEPS);
     }
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
@@ -157,10 +158,9 @@ description = "Bootstrapped by ironroot-new ({name})"
 fn server_cargo_toml(cfg: &ProjectConfig) -> String {
     let mut deps = String::from(
         "axum = \"0.7\"\n\
-         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n\
-         tracing = \"0.1\"\n\
-         tracing-subscriber = \"0.3\"\n",
+         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n",
     );
+    deps.push_str(LOGGING_DEPS);
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
             "sqlx = {{ version = \"0.7\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
@@ -222,16 +222,25 @@ fn cli_main_rs(cfg: &ProjectConfig) -> String {
     format!(
         r#"//! `{name}` — CLI bootstrapped by ironroot-new.
 
+{logging}
 fn main() {{
+    let _log_guard = init_logging("{name}");
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {{
+        tracing::info!(version = env!("CARGO_PKG_VERSION"), "{name} starting");
         println!("{name} v{{}}", env!("CARGO_PKG_VERSION"));
         println!("usage: {name} <command> [args...]");
         return;
     }}
     match args[0].as_str() {{
-        "hello" => println!("hello, {{}}!", args.get(1).map(String::as_str).unwrap_or("world")),
-        other => eprintln!("unknown command: {{other}}"),
+        "hello" => {{
+            tracing::info!(target = args.get(1).map(String::as_str).unwrap_or("world"), "greet");
+            println!("hello, {{}}!", args.get(1).map(String::as_str).unwrap_or("world"));
+        }}
+        other => {{
+            tracing::warn!(command = other, "unknown command");
+            eprintln!("unknown command: {{other}}");
+        }}
     }}
 }}
 
@@ -250,43 +259,48 @@ mod tests {{
 }}
 "#,
         name = cfg.name,
+        logging = LOGGING_BOOT,
     )
 }
 
-fn webapp_main_rs(_cfg: &ProjectConfig) -> String {
-    r#"//! HTTP server bootstrapped by ironroot-new.
+fn webapp_main_rs(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"//! HTTP server bootstrapped by ironroot-new.
 
-use axum::{routing::get, Router};
+use axum::{{routing::get, Router}};
 
+{logging}
 #[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
+async fn main() {{
+    let _log_guard = init_logging("{name}");
 
     let app = Router::new().route("/", get(root)).route("/health", get(health));
 
     let addr = "0.0.0.0:3000";
-    tracing::info!("listening on {addr}");
+    tracing::info!("listening on {{addr}}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
+}}
 
-async fn root() -> &'static str {
+async fn root() -> &'static str {{
     "ok"
-}
+}}
 
-async fn health() -> &'static str {
+async fn health() -> &'static str {{
     "healthy"
-}
+}}
 
 #[cfg(test)]
-mod tests {
+mod tests {{
     #[tokio::test]
-    async fn health_returns_healthy() {
+    async fn health_returns_healthy() {{
         assert_eq!(super::health().await, "healthy");
-    }
-}
-"#
-    .to_string()
+    }}
+}}
+"#,
+        name = cfg.name,
+        logging = LOGGING_BOOT,
+    )
 }
 
 fn client_main_rs(gui: Gui, name: &str) -> String {
@@ -350,6 +364,41 @@ const RUST_TOOLCHAIN: &str = r#"[toolchain]
 channel = "stable"
 "#;
 
+/// Dependency block giving generated projects working file-rotating logging
+/// (10 MB rotation, 5 retained files) — mirrors `ironroot-log`'s defaults.
+const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
+                            tracing-subscriber = { version = \"0.3\", features = [\"env-filter\", \"fmt\"] }\n\
+                            tracing-appender = \"0.2\"\n\
+                            file-rotate = \"0.7\"\n";
+
+/// Snippet inserted into generated `main.rs` files that boots the default
+/// file-rotating logger. Mirrors `ironroot_log::init_default`.
+const LOGGING_BOOT: &str = r#"// --- default rotating-file logger (10MB, keep 5) -----------------------
+fn init_logging(app_name: &str) -> tracing_appender::non_blocking::WorkerGuard {
+    use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+    std::fs::create_dir_all("logs").expect("create logs dir");
+    let path = std::path::Path::new("logs").join(format!("{app_name}.log"));
+    let rotator = FileRotate::new(
+        path,
+        AppendCount::new(5),
+        ContentLimit::Bytes(10 * 1024 * 1024),
+        Compression::None,
+        #[cfg(unix)]
+        None,
+    );
+    let (writer, guard) = tracing_appender::non_blocking(rotator);
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt::layer().with_ansi(false).with_writer(writer))
+        .with(fmt::layer().with_writer(std::io::stdout))
+        .init();
+    guard
+}
+"#;
+
 const CLI_SMOKE_TEST: &str = r#"//! Smoke test — the binary should build and the basic helper works.
 
 #[test]
@@ -380,6 +429,11 @@ fn gitignore() -> String {
 Cargo.lock
 .env
 .DS_Store
+
+# logs
+logs/
+*.log
+*.log.*
 
 # frontend
 node_modules

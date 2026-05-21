@@ -1,0 +1,22 @@
+[package]
+name = "ironroot-log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Default logging facade for IronRoot — file rotation (10MB) and optional syslog export"
+
+[features]
+default = []
+# Enable syslog export via the `LogConfig::with_syslog` builder.
+syslog = ["dep:syslog"]
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+file-rotate = "0.7"
+thiserror = "1"
+syslog = { version = "6", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

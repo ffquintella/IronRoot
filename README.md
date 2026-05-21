@@ -124,6 +124,17 @@ Provides abstractions for building command-line applications with structured arg
 
 *(Planned)* Desktop UI integration layer. Future support for Tauri and/or egui.
 
+### `ironroot-log`
+
+Default logging facade built on `tracing`. Provides 10 MB size-based file
+rotation (configurable), retains 5 historical files, and offers optional
+syslog export via the `syslog` feature flag. One-call setup:
+
+```rust
+let _guard = ironroot_log::init_default("my-app")?;
+tracing::info!("ready");
+```
+
 ---
 
 ## Documentation
