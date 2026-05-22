@@ -41,6 +41,7 @@ fn scaffold_cli(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     let tests = root.join("tests");
     fs::create_dir_all(&tests)?;
     write(&tests, "smoke.rs", CLI_SMOKE_TEST)?;
+    scaffold_bdd(&tests, ProjectKind::ClientTool)?;
     Ok(())
 }
 
@@ -52,6 +53,7 @@ fn scaffold_webapp(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     let tests = root.join("tests");
     fs::create_dir_all(&tests)?;
     write(&tests, "smoke.rs", WEBAPP_SMOKE_TEST)?;
+    scaffold_bdd(&tests, ProjectKind::WebApp)?;
     Ok(())
 }
 
@@ -66,6 +68,7 @@ fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(&server, "Cargo.toml", &server_cargo_toml(cfg))?;
     write(&server.join("src"), "main.rs", &webapp_main_rs(cfg))?;
     write(&server.join("tests"), "smoke.rs", WEBAPP_SMOKE_TEST)?;
+    scaffold_bdd(&server.join("tests"), ProjectKind::WebApp)?;
 
     // client
     let client = root.join("client");
@@ -75,6 +78,18 @@ fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     let gui = cfg.gui.expect("client/server must have a gui");
     write(&client.join("src"), "main.rs", &client_main_rs(gui, &cfg.name))?;
     write(&client.join("tests"), "smoke.rs", CLIENT_SMOKE_TEST)?;
+    scaffold_bdd(&client.join("tests"), ProjectKind::ClientServer)?;
+    Ok(())
+}
+
+/// Drop a starter Gherkin feature file and step-definitions runner into
+/// `tests/`. Cargo will pick `tests/bdd.rs` up automatically because each
+/// generated `Cargo.toml` carries a matching `[[test]] harness = false` entry.
+fn scaffold_bdd(tests_dir: &Path, _kind: ProjectKind) -> io::Result<()> {
+    let features = tests_dir.join("features");
+    fs::create_dir_all(&features)?;
+    write(&features, "arithmetic.feature", BDD_FEATURE)?;
+    write(tests_dir, "bdd.rs", BDD_RUNNER)?;
     Ok(())
 }
 
@@ -136,8 +151,11 @@ description = "Bootstrapped by ironroot"
 [dependencies]
 {deps}
 [dev-dependencies]
-"#,
+{bdd_deps}
+{bdd_harness}"#,
         name = cfg.name,
+        bdd_deps = BDD_DEV_DEPS,
+        bdd_harness = BDD_HARNESS,
     )
 }
 
@@ -178,8 +196,12 @@ path = "src/main.rs"
 
 [dependencies]
 {deps}
-"#,
+[dev-dependencies]
+{bdd_deps}
+{bdd_harness}"#,
         name = cfg.name,
+        bdd_deps = BDD_DEV_DEPS,
+        bdd_harness = BDD_HARNESS,
     )
 }
 
@@ -207,8 +229,12 @@ path = "src/main.rs"
 
 [dependencies]
 {deps}
-"#,
+[dev-dependencies]
+{bdd_deps}
+{bdd_harness}"#,
         name = cfg.name,
+        bdd_deps = BDD_DEV_DEPS,
+        bdd_harness = BDD_HARNESS,
     )
 }
 
@@ -378,6 +404,79 @@ const WEB_DEPS: &str = "axum = \"0.8\"\n\
                         tower = \"0.5\"\n\
                         tower-http = { version = \"0.6\", features = [\"trace\", \"cors\"] }\n";
 
+/// Behaviour-Driven Development dev-dependencies. `cucumber` runs Gherkin
+/// `.feature` files; `tokio` is required because step functions are async.
+const BDD_DEV_DEPS: &str = "cucumber = \"0.23\"\n\
+                            tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n";
+
+/// `[[test]]` section telling cargo to use the cucumber runner (no libtest
+/// harness) for `tests/bdd.rs`.
+const BDD_HARNESS: &str = "\n[[test]]\nname = \"bdd\"\nharness = false\n";
+
+/// Starter Gherkin scenario. The matching step definitions live in
+/// `tests/bdd.rs`. Add more `.feature` files alongside this one — the runner
+/// picks up every file under `tests/features/`.
+const BDD_FEATURE: &str = r#"Feature: Arithmetic helpers
+  As a developer
+  I want simple arithmetic helpers
+  So that I can verify the BDD harness works end-to-end.
+
+  Scenario: Adding two positive numbers
+    Given I have the numbers 2 and 3
+    When I add them together
+    Then the result should be 5
+
+  Scenario: Adding zero is identity
+    Given I have the numbers 7 and 0
+    When I add them together
+    Then the result should be 7
+"#;
+
+/// Cucumber runner + step definitions. Lives at `tests/bdd.rs`. Extend the
+/// `World` struct and add new `#[given]/#[when]/#[then]` functions as your
+/// domain grows — keep them thin and delegate to real helpers in `src/`.
+const BDD_RUNNER: &str = r#"//! BDD test runner — executes every `.feature` file under `tests/features/`.
+//!
+//! Run with `cargo test --test bdd` or `make bdd`.
+//!
+//! Step definitions should stay thin: parse Gherkin arguments, call into the
+//! real business-logic helpers in `src/`, and assert on the result. Avoid
+//! reimplementing logic inside steps — that defeats the purpose of BDD.
+
+use cucumber::{given, then, when, World};
+
+#[derive(Debug, Default, World)]
+pub struct AppWorld {
+    a: i64,
+    b: i64,
+    result: i64,
+}
+
+#[given(regex = r"^I have the numbers (-?\d+) and (-?\d+)$")]
+async fn given_numbers(world: &mut AppWorld, a: i64, b: i64) {
+    world.a = a;
+    world.b = b;
+}
+
+#[when("I add them together")]
+async fn when_added(world: &mut AppWorld) {
+    // In a real project this should call into a helper from `src/`, e.g.
+    // `world.result = my_crate::math::add(world.a, world.b);`
+    world.result = world.a + world.b;
+}
+
+#[then(regex = r"^the result should be (-?\d+)$")]
+async fn then_result(world: &mut AppWorld, expected: i64) {
+    assert_eq!(world.result, expected);
+}
+
+#[tokio::main]
+async fn main() {
+    AppWorld::run("tests/features").await;
+}
+"#;
+
+
 /// Dependency block giving generated projects working file-rotating logging
 /// (10 MB rotation, 5 retained files) — mirrors `ironroot-log`'s defaults.
 const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
@@ -487,13 +586,18 @@ frontend-build:
     };
 
     format!(
-        r#".PHONY: build test run fmt lint check clean
+        r#".PHONY: build test bdd run fmt lint check clean
 
 build:
 	cargo build --workspace
 
 test:
 	cargo test --workspace
+
+# Run BDD (Cucumber / Gherkin) scenarios only — feature files live under
+# `tests/features/` and step definitions in `tests/bdd.rs`.
+bdd:
+	cargo test --workspace --test bdd
 
 run:
 	cargo run
@@ -546,9 +650,24 @@ Bootstrapped by **ironroot**.
 
 ```bash
 make build
-make test
+make test     # unit + integration + BDD
+make bdd      # just the Gherkin scenarios
 make run
 ```
+
+## Testing
+
+This project ships with two test layers:
+
+- **Unit / integration tests** — standard `#[test]` functions in `src/` and
+  `tests/`.
+- **BDD scenarios** — Gherkin `.feature` files in `tests/features/`,
+  executed by [cucumber-rs](https://crates.io/crates/cucumber). Step
+  definitions live in `tests/bdd.rs`.
+
+Add a new scenario by dropping a `.feature` file under `tests/features/`
+and wiring matching `#[given]/#[when]/#[then]` steps into `tests/bdd.rs`.
+See [AGENTS.md](AGENTS.md) for the full convention.
 
 See [AGENTS.md](AGENTS.md) for AI-assistant guidance.
 "#,
@@ -590,11 +709,72 @@ should follow the conventions below in addition to the upstream
 6. **Tests are non-optional.** Every new feature ships with at least one test.
 7. **`unsafe` is forbidden** unless justified inline with a `// SAFETY:` note.
 
+## Business logic & helper modules
+
+Business logic belongs in **small, focused helper modules** under `src/` —
+never inlined into `main.rs`, handlers, or UI callbacks. The pattern:
+
+- **One module per bounded concept.** `src/pricing.rs`, `src/auth.rs`,
+  `src/billing/invoice.rs` — name the file after the *thing it owns*, not
+  after a layer (`utils.rs`, `helpers.rs`, `common.rs` are anti-patterns;
+  split them up).
+- **Expose narrow types and free functions, not god-structs.** A helper like
+  `pub fn calculate_tax(order: &Order) -> Money` is easier to test, reuse,
+  and call from BDD steps than a sprawling `OrderService::do_everything`.
+- **Group related helpers behind a trait** when there is more than one
+  implementation (e.g. `trait Clock {{ fn now(&self) -> DateTime; }}` with a
+  real and a `MockClock`). This is what makes the logic unit-testable and
+  BDD-testable without I/O.
+- **Inject dependencies; don't reach for globals.** Pass repositories,
+  clocks, HTTP clients in as parameters or constructor args. Singletons and
+  `lazy_static` make BDD scenarios non-deterministic.
+- **Return rich errors.** Use `thiserror` to define a domain error per
+  module (`PricingError`, `AuthError`) and let callers map them to HTTP /
+  CLI / UI responses. Never `panic!` in business logic.
+- **Pure first, side-effects at the edges.** If a helper *can* be a pure
+  function of its inputs, make it one. Push DB / network / filesystem calls
+  to thin adapters that the helper composes with — this is what lets the
+  same helper power both `#[test]` and `#[when]` BDD steps.
+
+When in doubt: if you cannot write a BDD scenario that exercises a helper
+without spinning up a server or a database, the helper is doing too much.
+
+## Testing
+
+Two layers ship by default — use **both**:
+
+1. **Unit & integration tests** (`#[test]` in `src/` and `tests/*.rs`) for
+   fast, deterministic checks of individual helpers.
+2. **BDD scenarios** (Gherkin `.feature` files under `tests/features/` with
+   step definitions in `tests/bdd.rs`) for behaviour that crosses module
+   boundaries or that a non-developer stakeholder should be able to read.
+
+### Writing a BDD scenario
+
+1. Add or extend a `.feature` file under `tests/features/`. Use
+   `Given / When / Then` and write the *behaviour*, not the implementation:
+
+   ```gherkin
+   Feature: Invoice totals
+     Scenario: VAT is applied to taxable line items
+       Given an invoice with a 100.00 EUR taxable item
+       When the totals are calculated
+       Then the grand total should be 121.00 EUR
+   ```
+
+2. Add matching step functions in `tests/bdd.rs` (`#[given] / #[when] /
+   #[then]`). Keep steps **thin** — parse arguments, call a helper from
+   `src/`, assert. No business logic inside steps.
+3. Extend `AppWorld` in `tests/bdd.rs` with whatever state the scenario
+   needs to thread between steps.
+4. Run `make bdd` (or `cargo test --test bdd`) locally before pushing.
+
 ## Workflow
 
 - `make fmt`   — format the workspace.
 - `make lint`  — run clippy with `-D warnings`.
-- `make test`  — run the full test suite.
+- `make test`  — run the full test suite (unit + integration + BDD).
+- `make bdd`   — run only the Cucumber/Gherkin scenarios.
 - Update this file whenever a new convention is agreed.
 "#,
         name = cfg.name,
