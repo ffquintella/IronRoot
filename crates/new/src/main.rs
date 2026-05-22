@@ -1,11 +1,11 @@
-//! # ironroot-new
+//! # ironroot
 //!
 //! Interactive project bootstrapper for the IronRoot framework.
 //!
 //! Run with:
 //!
 //! ```bash
-//! cargo run -p ironroot-new
+//! cargo run -p ironroot
 //! ```
 //!
 //! The tool asks a handful of questions (project kind, GUI toolkit, database,

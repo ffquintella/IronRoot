@@ -9,7 +9,7 @@ for two complementary GUI stacks:
 
 - **[Tauri](https://tauri.app)** — web-tech UI inside a native window. Best
   for apps that want to reuse a React/Angular/Vue frontend (see
-  [`ironroot-new`](new.md) for a bootstrap).
+  [`ironroot`](new.md) for a bootstrap).
 - **[egui](https://docs.rs/egui)** — pure-Rust immediate-mode GUI. Best for
   internal tools and apps where shipping a JS toolchain is overkill.
 
@@ -29,6 +29,6 @@ The two features will be mutually exclusive at compile time.
 The crate is a placeholder today. Real work begins in **Phase 3** of the
 [roadmap](../roadmap.md).
 
-If you need a GUI today, the [`ironroot-new`](new.md) tool can scaffold a
+If you need a GUI today, the [`ironroot`](new.md) tool can scaffold a
 client/server project with either Tauri or egui directly — without going
 through `ironroot-gui`.

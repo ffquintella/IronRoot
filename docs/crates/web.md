@@ -30,5 +30,5 @@ exists as a placeholder so the workspace builds. Real abstractions will
 land in **Phase 3** of the [roadmap](../roadmap.md).
 
 If you need HTTP today, use [`axum`](https://docs.rs/axum) directly inside
-your application crate; the bootstrap tool ([`ironroot-new`](new.md))
+your application crate; the bootstrap tool ([`ironroot`](new.md))
 generates a working axum scaffold.

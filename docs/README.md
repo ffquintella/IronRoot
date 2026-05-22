@@ -42,7 +42,7 @@ to Python's `http.server` if Node is not available. Then open
 | [`ironroot-dal`](crates/dal.md) | Data Access Layer (SQLite + MySQL by default) |
 | [`ironroot-dal-hiqlite`](crates/dal-hiqlite.md) | Hiqlite integration *(standalone crate)* |
 | [`ironroot-auth`](crates/auth.md) | Argon2id passwords + optional ML-KEM PQ sealing |
-| [`ironroot-new`](crates/new.md) | Interactive project bootstrapper |
+| [`ironroot`](crates/new.md) | Interactive project bootstrapper |
 
 ## Project status
 

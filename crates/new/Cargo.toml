@@ -1,10 +1,10 @@
 [package]
-name = "ironroot-new"
+name = "ironroot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Interactive project bootstrapper for the IronRoot framework"
 
 [[bin]]
-name = "ironroot-new"
+name = "ironroot"
 path = "src/main.rs"

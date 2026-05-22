@@ -1,4 +1,4 @@
-# `ironroot-new`
+# `ironroot`
 
 Interactive project bootstrapper for the IronRoot framework.
 
@@ -9,7 +9,7 @@ From the workspace root:
 ```bash
 make new
 # or:
-cargo run -p ironroot-new
+cargo run -p ironroot
 ```
 
 ## What it asks

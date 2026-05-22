@@ -15,7 +15,7 @@
   - [ironroot-dal](crates/dal.md)
   - [ironroot-dal-hiqlite](crates/dal-hiqlite.md)
   - [ironroot-auth](crates/auth.md)
-  - [ironroot-new](crates/new.md)
+  - [ironroot](crates/new.md)
 
 - **Guides**
   - [AI Agents](../ai/AGENTS.md)

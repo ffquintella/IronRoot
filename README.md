@@ -82,10 +82,10 @@ cargo build
 ### Bootstrap a new project (interactive)
 
 ```bash
-cargo run -p ironroot-new
+cargo run -p ironroot
 ```
 
-`ironroot-new` asks for the project kind (CLI tool, web app, client/server),
+`ironroot` asks for the project kind (CLI tool, web app, client/server),
 the GUI toolkit (Tauri or egui — only for client/server), the frontend
 framework (React or Angular — only when a web UI is involved), and the
 database, then writes out a ready-to-build project with `Cargo.toml`,

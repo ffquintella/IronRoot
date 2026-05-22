@@ -830,6 +830,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironroot"
+version = "0.2.0"
+
+[[package]]
 name = "ironroot-auth"
 version = "0.2.0"
 dependencies = [
@@ -900,10 +904,6 @@ dependencies = [
 
 [[package]]
 name = "ironroot-mcp-example"
-version = "0.2.0"
-
-[[package]]
-name = "ironroot-new"
 version = "0.2.0"
 
 [[package]]
