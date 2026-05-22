@@ -108,16 +108,17 @@ fn scaffold_frontend(frontend: Frontend, root: &Path) -> io::Result<()> {
 
 fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
     let mut deps = String::new();
+    deps.push_str(BASE_DEPS);
     if matches!(cfg.kind, ProjectKind::WebApp) {
-        deps.push_str("axum = \"0.7\"\n");
-        deps.push_str("tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n");
+        deps.push_str(WEB_DEPS);
         deps.push_str(LOGGING_DEPS);
     } else if matches!(cfg.kind, ProjectKind::ClientTool) {
+        deps.push_str(CLI_DEPS);
         deps.push_str(LOGGING_DEPS);
     }
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
-            "sqlx = {{ version = \"0.7\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+            "sqlx = {{ version = \"0.8\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
         ));
     }
     let bin_section = if kind == "bin" {
@@ -130,7 +131,7 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
 name = "{name}"
 version = "0.1.0"
 edition = "2021"
-description = "Bootstrapped by ironroot-new"
+description = "Bootstrapped by ironroot"
 {bin_section}
 [dependencies]
 {deps}
@@ -149,21 +150,20 @@ members = ["server", "client"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Bootstrapped by ironroot-new ({name})"
+description = "Bootstrapped by ironroot ({name})"
 "#,
         name = cfg.name,
     )
 }
 
 fn server_cargo_toml(cfg: &ProjectConfig) -> String {
-    let mut deps = String::from(
-        "axum = \"0.7\"\n\
-         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\"] }\n",
-    );
+    let mut deps = String::new();
+    deps.push_str(BASE_DEPS);
+    deps.push_str(WEB_DEPS);
     deps.push_str(LOGGING_DEPS);
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
-            "sqlx = {{ version = \"0.7\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+            "sqlx = {{ version = \"0.8\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
         ));
     }
     format!(
@@ -185,18 +185,16 @@ path = "src/main.rs"
 
 fn client_cargo_toml(cfg: &ProjectConfig) -> String {
     let gui = cfg.gui.expect("client/server must have a gui");
-    let deps = match gui {
+    let mut deps = String::new();
+    deps.push_str(BASE_DEPS);
+    match gui {
         Gui::Egui => {
-            "eframe = \"0.27\"\negui = \"0.27\"\n".to_string()
+            deps.push_str("eframe = \"0.34\"\negui = \"0.34\"\n");
         }
         Gui::Tauri => {
-            // Minimal placeholder; real Tauri projects need additional setup.
-            "tauri = { version = \"2\", features = [] }\n\
-             serde = { version = \"1\", features = [\"derive\"] }\n\
-             serde_json = \"1\"\n"
-                .to_string()
+            deps.push_str("tauri = { version = \"2\", features = [] }\n");
         }
-    };
+    }
     format!(
         r#"[package]
 name = "{name}-client"
@@ -220,7 +218,7 @@ path = "src/main.rs"
 
 fn cli_main_rs(cfg: &ProjectConfig) -> String {
     format!(
-        r#"//! `{name}` — CLI bootstrapped by ironroot-new.
+        r#"//! `{name}` — CLI bootstrapped by ironroot.
 
 {logging}
 fn main() {{
@@ -265,7 +263,7 @@ mod tests {{
 
 fn webapp_main_rs(cfg: &ProjectConfig) -> String {
     format!(
-        r#"//! HTTP server bootstrapped by ironroot-new.
+        r#"//! HTTP server bootstrapped by ironroot.
 
 use axum::{{routing::get, Router}};
 
@@ -364,12 +362,28 @@ const RUST_TOOLCHAIN: &str = r#"[toolchain]
 channel = "stable"
 "#;
 
+/// Baseline dependencies every generated project gets — error handling and
+/// (de)serialization that almost every Rust app reaches for.
+const BASE_DEPS: &str = "anyhow = \"1\"\n\
+                         thiserror = \"2\"\n\
+                         serde = { version = \"1\", features = [\"derive\"] }\n\
+                         serde_json = \"1\"\n";
+
+/// Extra deps for CLI-shaped projects.
+const CLI_DEPS: &str = "clap = { version = \"4\", features = [\"derive\"] }\n";
+
+/// Extra deps for HTTP-server-shaped projects.
+const WEB_DEPS: &str = "axum = \"0.8\"\n\
+                        tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\", \"signal\"] }\n\
+                        tower = \"0.5\"\n\
+                        tower-http = { version = \"0.6\", features = [\"trace\", \"cors\"] }\n";
+
 /// Dependency block giving generated projects working file-rotating logging
 /// (10 MB rotation, 5 retained files) — mirrors `ironroot-log`'s defaults.
 const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
                             tracing-subscriber = { version = \"0.3\", features = [\"env-filter\", \"fmt\"] }\n\
                             tracing-appender = \"0.2\"\n\
-                            file-rotate = \"0.7\"\n";
+                            file-rotate = \"0.8\"\n";
 
 /// Snippet inserted into generated `main.rs` files that boots the default
 /// file-rotating logger. Mirrors `ironroot_log::init_default`.
@@ -518,7 +532,7 @@ fn readme(cfg: &ProjectConfig) -> String {
     format!(
         r#"# {name}
 
-Bootstrapped by **ironroot-new**.
+Bootstrapped by **ironroot**.
 
 ## Stack
 
@@ -556,7 +570,7 @@ fn agents_md(cfg: &ProjectConfig) -> String {
     format!(
         r#"# AI Agent Instructions — {name}
 
-This project was scaffolded by `ironroot-new`. AI assistants working on it
+This project was scaffolded by `ironroot`. AI assistants working on it
 should follow the conventions below in addition to the upstream
 [IronRoot AGENTS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/AGENTS.md).
 
