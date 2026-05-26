@@ -2,23 +2,18 @@
 
 Hiqlite (Raft-backed embedded SQLite) integration for [`ironroot-dal`].
 
-## Why is this a standalone crate?
+## Relationship to `ironroot-dal`
 
-Both [`hiqlite`](https://crates.io/crates/hiqlite) (via `rusqlite`) and
-`sqlx-sqlite` declare `links = "sqlite3"` on the same native library. Cargo
-refuses to build any dependency graph that activates both at once.
+`ironroot-dal`'s SQLite backend is built on `rusqlite` — the same crate
+hiqlite uses internally — so both can coexist in one Cargo workspace
+without the historical `links = "sqlite3"` clash that `sqlx-sqlite` used
+to cause. This crate is a regular workspace member and builds with the
+rest of IronRoot via `cargo build --workspace`.
 
-To keep that conflict from breaking the main IronRoot workspace, this crate
-is **excluded** from the workspace `members` list (see the `exclude` entry
-in the top-level `Cargo.toml`). It builds independently:
-
-```bash
-cd crates/dal-hiqlite
-cargo build
-```
-
-It depends on `ironroot-dal` with `default-features = false, features =
-["mysql"]` so the sqlx-sqlite driver never enters the graph for this crate.
+`ironroot-dal-hiqlite` does not depend on `ironroot-dal` directly so
+callers that only need hiqlite can skip sqlx (and its MySQL / PostgreSQL
+transitive deps). The small `DalError` / `ExecResult` shapes are
+duplicated intentionally for that reason.
 
 ## Usage
 

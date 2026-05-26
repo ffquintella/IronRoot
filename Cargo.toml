@@ -8,15 +8,11 @@ members = [
     "crates/gui",
     "crates/log",
     "crates/dal",
+    "crates/dal-hiqlite",
     "crates/auth",
     "crates/new",
     "mcp/servers/example_server",
 ]
-# `ironroot-dal-hiqlite` lives in this repo but is intentionally NOT a
-# workspace member because it links `libsqlite3-sys` via hiqlite/rusqlite,
-# which conflicts with the `sqlite` feature on `ironroot-dal` (sqlx-sqlite).
-# It builds as a standalone crate from `crates/dal-hiqlite/` — see its README.
-exclude = ["crates/dal-hiqlite"]
 
 [workspace.package]
 version = "0.2.0"

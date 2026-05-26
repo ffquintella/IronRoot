@@ -81,10 +81,10 @@ pub enum DalError {
     NotFound,
 }
 
-impl From<sqlx::Error> for DalError {
-    fn from(value: sqlx::Error) -> Self {
+impl From<sqlx_core::error::Error> for DalError {
+    fn from(value: sqlx_core::error::Error) -> Self {
         match value {
-            sqlx::Error::RowNotFound => DalError::NotFound,
+            sqlx_core::error::Error::RowNotFound => DalError::NotFound,
             other => DalError::Database(other.to_string()),
         }
     }

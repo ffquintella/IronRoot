@@ -8,18 +8,16 @@
 //! `ironroot-dal`'s pool API, while letting power users drop down to the
 //! underlying [`hiqlite::Client`] for full read APIs.
 //!
-//! ## Why a standalone crate (not a feature on `ironroot-dal`)?
+//! ## Why a separate crate (not a feature on `ironroot-dal`)?
 //!
-//! Hiqlite links the `sqlite3` native library via `rusqlite`, and so does
-//! `sqlx-sqlite`. Cargo refuses to build any dependency graph that activates
-//! both, **even when only one of the two features is enabled** — the
-//! resolver pessimistically considers all reachable `links` consumers
-//! up-front. Keeping hiqlite in its own crate (excluded from the IronRoot
-//! workspace) avoids the conflict for projects that don't need it.
+//! `ironroot-dal`'s SQLite backend is built on `rusqlite` — the same crate
+//! hiqlite uses — so the two can coexist in one Cargo workspace. Hiqlite
+//! lives in its own crate so callers that only need the Raft-backed
+//! variant don't pull sqlx and the MySQL / PostgreSQL transitive deps.
 //!
-//! For the same reason this crate intentionally does **not** depend on
-//! `ironroot-dal`; the small [`DalError`] / [`ExecResult`] shapes are
-//! mirrored locally and are API-compatible with their counterparts there.
+//! This crate intentionally does **not** depend on `ironroot-dal`; the
+//! small [`DalError`] / [`ExecResult`] shapes are mirrored locally and
+//! are API-compatible with their counterparts there.
 //!
 //! ## Example
 //!

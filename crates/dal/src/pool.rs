@@ -4,6 +4,9 @@ use async_trait::async_trait;
 
 use crate::{row::Row, DalError, DalPool, ExecResult};
 
+#[cfg(feature = "sqlite")]
+use std::sync::{Arc, Mutex};
+
 /// Database backend the pool is connected to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
@@ -31,21 +34,65 @@ impl Backend {
     }
 }
 
+/// Shared rusqlite connection wrapped for async use via `spawn_blocking`.
+#[cfg(feature = "sqlite")]
+#[derive(Clone)]
+pub struct SqlitePool {
+    conn: Arc<Mutex<rusqlite::Connection>>,
+}
+
+#[cfg(feature = "sqlite")]
+impl std::fmt::Debug for SqlitePool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqlitePool").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl SqlitePool {
+    /// Open from a connection URL (`sqlite::memory:`, `sqlite:path.db`, `sqlite:///abs/path`).
+    pub fn open(url: &str) -> Result<Self, DalError> {
+        let conn = open_sqlite(url)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+}
+
+#[cfg(feature = "sqlite")]
+fn open_sqlite(url: &str) -> Result<rusqlite::Connection, DalError> {
+    let rest = url
+        .strip_prefix("sqlite:")
+        .ok_or_else(|| DalError::UnsupportedUrl(url.to_string()))?;
+    let conn = if rest == ":memory:" || rest.is_empty() {
+        rusqlite::Connection::open_in_memory()
+    } else {
+        let path = rest.trim_start_matches("//");
+        rusqlite::Connection::open(path)
+    };
+    conn.map_err(|e| DalError::Database(e.to_string()))
+}
+
+#[cfg(feature = "sqlite")]
+fn map_rusqlite(e: rusqlite::Error) -> DalError {
+    DalError::Database(e.to_string())
+}
+
 /// A runtime-routed connection pool that dispatches to the appropriate
-/// `sqlx` backend.
+/// backend driver (rusqlite for SQLite, sqlx for MySQL/Postgres).
 ///
 /// Construct with [`Pool::connect`]; the URL scheme determines the backend.
 #[derive(Debug, Clone)]
 pub enum Pool {
-    /// SQLite-backed pool.
+    /// SQLite-backed pool (rusqlite).
     #[cfg(feature = "sqlite")]
-    Sqlite(sqlx::SqlitePool),
+    Sqlite(SqlitePool),
     /// MySQL-backed pool.
     #[cfg(feature = "mysql")]
-    MySql(sqlx::MySqlPool),
+    MySql(sqlx_mysql::MySqlPool),
     /// PostgreSQL-backed pool.
     #[cfg(feature = "postgres")]
-    Postgres(sqlx::PgPool),
+    Postgres(sqlx_postgres::PgPool),
 }
 
 impl Pool {
@@ -63,8 +110,7 @@ impl Pool {
 
     #[cfg(feature = "sqlite")]
     async fn connect_sqlite(url: &str) -> Result<Self, DalError> {
-        let pool = sqlx::SqlitePool::connect(url).await?;
-        Ok(Pool::Sqlite(pool))
+        Ok(Pool::Sqlite(SqlitePool::open(url)?))
     }
 
     #[cfg(not(feature = "sqlite"))]
@@ -76,7 +122,7 @@ impl Pool {
 
     #[cfg(feature = "mysql")]
     async fn connect_mysql(url: &str) -> Result<Self, DalError> {
-        let pool = sqlx::MySqlPool::connect(url).await?;
+        let pool = sqlx_mysql::MySqlPool::connect(url).await?;
         Ok(Pool::MySql(pool))
     }
 
@@ -89,7 +135,7 @@ impl Pool {
 
     #[cfg(feature = "postgres")]
     async fn connect_postgres(url: &str) -> Result<Self, DalError> {
-        let pool = sqlx::PgPool::connect(url).await?;
+        let pool = sqlx_postgres::PgPool::connect(url).await?;
         Ok(Pool::Postgres(pool))
     }
 
@@ -116,7 +162,7 @@ impl Pool {
     pub async fn close(&self) {
         match self {
             #[cfg(feature = "sqlite")]
-            Pool::Sqlite(p) => p.close().await,
+            Pool::Sqlite(_) => { /* rusqlite connection drops with the Arc */ }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => p.close().await,
             #[cfg(feature = "postgres")]
@@ -129,15 +175,23 @@ impl Pool {
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
-                let r = sqlx::query(sql).execute(p).await?;
-                Ok(ExecResult {
-                    rows_affected: r.rows_affected(),
-                    last_insert_id: Some(r.last_insert_rowid()),
+                let conn = p.conn.clone();
+                let sql = sql.to_string();
+                tokio::task::spawn_blocking(move || {
+                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                    let rows = conn.execute(&sql, []).map_err(map_rusqlite)?;
+                    let last_id = conn.last_insert_rowid();
+                    Ok::<_, DalError>(ExecResult {
+                        rows_affected: rows as u64,
+                        last_insert_id: Some(last_id),
+                    })
                 })
+                .await
+                .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
-                let r = sqlx::query(sql).execute(p).await?;
+                let r = sqlx_core::query::query(sql).execute(p).await?;
                 Ok(ExecResult {
                     rows_affected: r.rows_affected(),
                     last_insert_id: Some(r.last_insert_id() as i64),
@@ -145,7 +199,7 @@ impl Pool {
             }
             #[cfg(feature = "postgres")]
             Pool::Postgres(p) => {
-                let r = sqlx::query(sql).execute(p).await?;
+                let r = sqlx_core::query::query(sql).execute(p).await?;
                 Ok(ExecResult {
                     rows_affected: r.rows_affected(),
                     last_insert_id: None,
@@ -159,17 +213,30 @@ impl Pool {
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
-                Ok(rows.into_iter().map(Row::from_sqlite).collect())
+                let conn = p.conn.clone();
+                let sql = sql.to_string();
+                tokio::task::spawn_blocking(move || {
+                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                    let mut stmt = conn.prepare(&sql).map_err(map_rusqlite)?;
+                    let mut rows = stmt.query([]).map_err(map_rusqlite)?;
+                    let mut out = Vec::new();
+                    while let Some(row) = rows.next().map_err(map_rusqlite)? {
+                        let r = crate::row::SqliteRow::from_row(row).map_err(map_rusqlite)?;
+                        out.push(Row::from_sqlite(r));
+                    }
+                    Ok::<_, DalError>(out)
+                })
+                .await
+                .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
+                let rows = sqlx_core::query::query(sql).fetch_all(p).await?;
                 Ok(rows.into_iter().map(Row::from_mysql).collect())
             }
             #[cfg(feature = "postgres")]
             Pool::Postgres(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
+                let rows = sqlx_core::query::query(sql).fetch_all(p).await?;
                 Ok(rows.into_iter().map(Row::from_pg).collect())
             }
         }
@@ -179,11 +246,26 @@ impl Pool {
     pub async fn fetch_optional(&self, sql: &str) -> Result<Option<Row>, DalError> {
         match self {
             #[cfg(feature = "sqlite")]
-            Pool::Sqlite(p) => Ok(sqlx::query(sql).fetch_optional(p).await?.map(Row::from_sqlite)),
+            Pool::Sqlite(p) => {
+                let conn = p.conn.clone();
+                let sql = sql.to_string();
+                tokio::task::spawn_blocking(move || {
+                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                    let mut stmt = conn.prepare(&sql).map_err(map_rusqlite)?;
+                    let mut rows = stmt.query([]).map_err(map_rusqlite)?;
+                    let opt = match rows.next().map_err(map_rusqlite)? {
+                        Some(row) => Some(crate::row::SqliteRow::from_row(row).map_err(map_rusqlite)?),
+                        None => None,
+                    };
+                    Ok::<_, DalError>(opt.map(Row::from_sqlite))
+                })
+                .await
+                .map_err(|e| DalError::Database(e.to_string()))?
+            }
             #[cfg(feature = "mysql")]
-            Pool::MySql(p) => Ok(sqlx::query(sql).fetch_optional(p).await?.map(Row::from_mysql)),
+            Pool::MySql(p) => Ok(sqlx_core::query::query(sql).fetch_optional(p).await?.map(Row::from_mysql)),
             #[cfg(feature = "postgres")]
-            Pool::Postgres(p) => Ok(sqlx::query(sql).fetch_optional(p).await?.map(Row::from_pg)),
+            Pool::Postgres(p) => Ok(sqlx_core::query::query(sql).fetch_optional(p).await?.map(Row::from_pg)),
         }
     }
 }
