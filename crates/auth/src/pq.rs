@@ -34,15 +34,22 @@ use chacha20poly1305::{
 // format `keypair_bytes` has always emitted, and `DecapsulationKey::to_seed`
 // returns `None` for keys loaded from an expanded encoding — so switching would
 // strand every already-persisted keypair. See the note on `keypair_bytes`.
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use hkdf::Hkdf;
 #[allow(deprecated)]
 use ml_kem::ExpandedKeyEncoding;
 use ml_kem::{Decapsulate, Encapsulate, Kem, KeyExport, MlKem768, array::Array};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
 use crate::AuthError;
 
-const VERSION: u8 = 1;
+/// Original envelope: encryption key derived as `SHA-256(context || shared)`.
+/// Still accepted on unseal so hashes sealed by earlier versions keep working.
+const VERSION_V1_SHA256: u8 = 1;
+/// Current envelope: key derived with HKDF-SHA256, the standard construction.
+const VERSION_HKDF: u8 = 2;
 
 /// A sealed Argon2id PHC string.
 ///
@@ -50,6 +57,8 @@ const VERSION: u8 = 1;
 /// [`SealedHash::encode`] / [`SealedHash::decode`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SealedHash {
+    /// Envelope version, which selects the key-derivation function on unseal.
+    version: u8,
     ct: Vec<u8>,
     nonce: [u8; 12],
     ciphertext: Vec<u8>,
@@ -59,7 +68,7 @@ impl SealedHash {
     /// Encode the sealed envelope as a URL-safe base64 string without padding.
     pub fn encode(&self) -> String {
         let mut buf = Vec::with_capacity(1 + self.ct.len() + 12 + self.ciphertext.len());
-        buf.push(VERSION);
+        buf.push(self.version);
         buf.extend_from_slice(&(self.ct.len() as u32).to_be_bytes());
         buf.extend_from_slice(&self.ct);
         buf.extend_from_slice(&self.nonce);
@@ -73,8 +82,9 @@ impl SealedHash {
         if raw.len() < 1 + 4 + 12 + 16 {
             return Err(AuthError::PqSeal("envelope truncated".into()));
         }
-        if raw[0] != VERSION {
-            return Err(AuthError::PqSeal(format!("unknown version {}", raw[0])));
+        let version = raw[0];
+        if version != VERSION_V1_SHA256 && version != VERSION_HKDF {
+            return Err(AuthError::PqSeal(format!("unknown version {version}")));
         }
         let ct_len = u32::from_be_bytes([raw[1], raw[2], raw[3], raw[4]]) as usize;
         let header = 5;
@@ -87,6 +97,7 @@ impl SealedHash {
         nonce.copy_from_slice(&raw[nonce_start..nonce_start + 12]);
         let ciphertext = raw[nonce_start + 12..].to_vec();
         Ok(SealedHash {
+            version,
             ct,
             nonce,
             ciphertext,
@@ -114,9 +125,14 @@ impl PqSealer {
     /// Return the serialised `(decapsulation_key, encapsulation_key)` for
     /// persistence. The decapsulation key is sensitive — store it like any
     /// other server secret.
-    pub fn keypair_bytes(&self) -> (Vec<u8>, Vec<u8>) {
+    ///
+    /// The decapsulation key is wrapped in [`Zeroizing`] so this copy is wiped
+    /// when dropped; it still derefs to `Vec<u8>`, so callers that just write
+    /// it out need no changes. Anything *you* copy it into is your
+    /// responsibility.
+    pub fn keypair_bytes(&self) -> (Zeroizing<Vec<u8>>, Vec<u8>) {
         #[allow(deprecated)]
-        let dk_bytes = self.dk.to_expanded_bytes().to_vec();
+        let dk_bytes = Zeroizing::new(self.dk.to_expanded_bytes().to_vec());
         (dk_bytes, self.ek.to_bytes().to_vec())
     }
 
@@ -139,14 +155,15 @@ impl PqSealer {
         let mut rng = rand::rng();
         let (ct, shared) = self.ek.encapsulate_with_rng(&mut rng);
 
-        let key = derive_key(shared.as_slice());
-        let aead = ChaCha20Poly1305::new(&Key::from(key));
+        let key = derive_key(VERSION_HKDF, shared.as_slice());
+        let aead = ChaCha20Poly1305::new(&Key::from(*key));
         let mut nonce = [0u8; 12];
         rng.fill_bytes(&mut nonce);
         let ciphertext = aead
             .encrypt(&Nonce::from(nonce), plaintext)
             .map_err(|e| AuthError::PqSeal(format!("aead encrypt: {e}")))?;
         Ok(SealedHash {
+            version: VERSION_HKDF,
             ct: ct.as_slice().to_vec(),
             nonce,
             ciphertext,
@@ -159,76 +176,123 @@ impl PqSealer {
             .map_err(|_| AuthError::PqSeal("invalid ciphertext length".into()))?;
         let shared = self.dk.decapsulate(&ct_arr);
 
-        let key = derive_key(shared.as_slice());
-        let aead = ChaCha20Poly1305::new(&Key::from(key));
+        let key = derive_key(sealed.version, shared.as_slice());
+        let aead = ChaCha20Poly1305::new(&Key::from(*key));
         aead.decrypt(&Nonce::from(sealed.nonce), sealed.ciphertext.as_ref())
             .map_err(|e| AuthError::PqSeal(format!("aead decrypt: {e}")))
     }
 }
 
-fn derive_key(shared: &[u8]) -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(b"ironroot-auth/pq-seal/v1");
-    h.update(shared);
-    let out = h.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&out);
+/// Derive the ChaCha20-Poly1305 key from the ML-KEM shared secret.
+///
+/// `version` selects the construction so that envelopes sealed by older
+/// releases stay readable:
+///
+/// - [`VERSION_V1_SHA256`] — `SHA-256(context || shared)`. Sound here (the
+///   ML-KEM shared secret is already a uniformly random 32 bytes), but
+///   non-standard, so it is kept only for decrypting existing data.
+/// - [`VERSION_HKDF`] — HKDF-SHA256 with the context as `info`. The standard,
+///   auditable choice, and what every new seal uses.
+fn derive_key(version: u8, shared: &[u8]) -> Zeroizing<[u8; 32]> {
+    const CONTEXT: &[u8] = b"ironroot-auth/pq-seal/v1";
+    let mut key = Zeroizing::new([0u8; 32]);
+    if version == VERSION_V1_SHA256 {
+        let mut h = Sha256::new();
+        h.update(CONTEXT);
+        h.update(shared);
+        key.copy_from_slice(&h.finalize());
+    } else {
+        let hk = Hkdf::<Sha256>::new(None, shared);
+        hk.expand(CONTEXT, key.as_mut())
+            .expect("HKDF-SHA256 expand of 32 bytes cannot fail");
+    }
     key
 }
 
-// --- minimal URL-safe base64 (no padding) ---------------------------------
-
-const ALPH: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+// --- URL-safe base64 (no padding) -----------------------------------------
+//
+// Previously hand-rolled here. Swapped for the `base64` crate: identical
+// output alphabet and padding behaviour, but a well-tested implementation
+// rather than one this project has to maintain and audit itself.
 
 fn b64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = chunk.get(1).copied().unwrap_or(0);
-        let b2 = chunk.get(2).copied().unwrap_or(0);
-        out.push(ALPH[(b0 >> 2) as usize] as char);
-        out.push(ALPH[(((b0 & 0b11) << 4) | (b1 >> 4)) as usize] as char);
-        if chunk.len() >= 2 {
-            out.push(ALPH[(((b1 & 0b1111) << 2) | (b2 >> 6)) as usize] as char);
-        }
-        if chunk.len() >= 3 {
-            out.push(ALPH[(b2 & 0b111111) as usize] as char);
-        }
-    }
-    out
+    URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn b64_decode(s: &str) -> Result<Vec<u8>, String> {
-    let mut vals = Vec::with_capacity(s.len());
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            _ => return Err(format!("invalid char {:?}", c as char)),
-        };
-        vals.push(v);
-    }
-    let mut out = Vec::with_capacity(vals.len() * 3 / 4);
-    for chunk in vals.chunks(4) {
-        let v0 = chunk[0];
-        let v1 = chunk.get(1).copied().unwrap_or(0);
-        out.push((v0 << 2) | (v1 >> 4));
-        if let Some(&v2) = chunk.get(2) {
-            out.push(((v1 & 0b1111) << 4) | (v2 >> 2));
-            if let Some(&v3) = chunk.get(3) {
-                out.push(((v2 & 0b11) << 6) | v3);
-            }
-        }
-    }
-    Ok(out)
+fn b64_decode(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    URL_SAFE_NO_PAD.decode(s)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Envelopes written before the HKDF switch must still unseal, otherwise a
+    /// dependency upgrade would silently lock every stored password hash.
+    #[test]
+    fn v1_sha256_envelopes_still_unseal() {
+        use chacha20poly1305::aead::{Aead, KeyInit};
+
+        let sealer = PqSealer::generate();
+        let mut rng = rand::rng();
+        let (ct, shared) = sealer.ek.encapsulate_with_rng(&mut rng);
+
+        // Hand-build a v1 envelope the way the pre-HKDF code did.
+        let key = derive_key(VERSION_V1_SHA256, shared.as_slice());
+        let aead = ChaCha20Poly1305::new(&Key::from(*key));
+        let nonce = [7u8; 12];
+        let ciphertext = aead
+            .encrypt(&Nonce::from(nonce), b"$argon2id$legacy".as_ref())
+            .unwrap();
+        let legacy = SealedHash {
+            version: VERSION_V1_SHA256,
+            ct: ct.as_slice().to_vec(),
+            nonce,
+            ciphertext,
+        };
+
+        assert_eq!(sealer.unseal(&legacy).unwrap(), b"$argon2id$legacy");
+
+        // ...and it survives an encode/decode round trip.
+        let reparsed = SealedHash::decode(&legacy.encode()).unwrap();
+        assert_eq!(reparsed.version, VERSION_V1_SHA256);
+        assert_eq!(sealer.unseal(&reparsed).unwrap(), b"$argon2id$legacy");
+    }
+
+    #[test]
+    fn new_seals_use_the_hkdf_envelope() {
+        let sealer = PqSealer::generate();
+        let sealed = sealer.seal(b"secret").unwrap();
+        assert_eq!(sealed.version, VERSION_HKDF);
+        assert_eq!(SealedHash::decode(&sealed.encode()).unwrap(), sealed);
+    }
+
+    /// The `base64` crate must produce byte-identical output to the hand-rolled
+    /// encoder it replaced, or previously stored envelopes would not parse.
+    #[test]
+    fn base64_matches_the_previous_hand_rolled_encoder() {
+        const ALPH: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        fn legacy_encode(bytes: &[u8]) -> String {
+            let mut out = String::new();
+            for chunk in bytes.chunks(3) {
+                let b0 = chunk[0] as u32;
+                let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+                let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+                let n = (b0 << 16) | (b1 << 8) | b2;
+                let take = chunk.len() + 1;
+                for i in 0..take {
+                    out.push(ALPH[((n >> (18 - 6 * i)) & 0x3F) as usize] as char);
+                }
+            }
+            out
+        }
+
+        for n in 0..64usize {
+            let bytes: Vec<u8> = (0..n).map(|i| (i * 7 + 3) as u8).collect();
+            assert_eq!(b64_encode(&bytes), legacy_encode(&bytes), "n={n}");
+            assert_eq!(b64_decode(&b64_encode(&bytes)).unwrap(), bytes, "n={n}");
+        }
+    }
 
     #[test]
     fn seal_unseal_roundtrip() {
