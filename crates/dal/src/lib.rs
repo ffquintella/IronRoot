@@ -61,10 +61,12 @@ use thiserror::Error;
 mod pool;
 mod repository;
 mod row;
+mod value;
 
 pub use pool::{Backend, Pool};
 pub use repository::Repository;
 pub use row::Row;
+pub use value::Value;
 
 /// Top-level error type returned by all DAL operations.
 #[derive(Debug, Error)]
@@ -130,11 +132,32 @@ pub trait DalPool: Send + Sync {
     fn backend(&self) -> Backend;
 
     /// Execute a statement that does not return rows.
+    ///
+    /// Prefer [`DalPool::execute_with`] when the statement includes dynamic
+    /// data — this method sends `sql` verbatim.
     async fn execute(&self, sql: &str) -> Result<ExecResult, DalError>;
 
+    /// Execute a non-row-returning statement with bind parameters.
+    async fn execute_with(&self, sql: &str, params: &[Value]) -> Result<ExecResult, DalError>;
+
     /// Fetch all rows matching the query.
+    ///
+    /// Prefer [`DalPool::fetch_all_with`] when the query includes dynamic data.
     async fn fetch_all(&self, sql: &str) -> Result<Vec<Row>, DalError>;
 
+    /// Fetch all rows matching the query, with bind parameters.
+    async fn fetch_all_with(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>, DalError>;
+
     /// Fetch at most one row.
+    ///
+    /// Prefer [`DalPool::fetch_optional_with`] when the query includes
+    /// dynamic data.
     async fn fetch_optional(&self, sql: &str) -> Result<Option<Row>, DalError>;
+
+    /// Fetch at most one row, with bind parameters.
+    async fn fetch_optional_with(
+        &self,
+        sql: &str,
+        params: &[Value],
+    ) -> Result<Option<Row>, DalError>;
 }

@@ -19,7 +19,7 @@ use crate::Pool;
 ///
 /// ```no_run
 /// use async_trait::async_trait;
-/// use ironroot_dal::{DalError, Pool, Repository, Row};
+/// use ironroot_dal::{DalError, Pool, Repository, Row, Value};
 ///
 /// pub struct User {
 ///     pub id: i64,
@@ -36,8 +36,10 @@ use crate::Pool;
 ///     type Id = i64;
 ///
 ///     async fn find_by_id(&self, id: i64) -> Result<Option<User>, DalError> {
-///         let sql = format!("SELECT id, name FROM users WHERE id = {id}");
-///         let row = self.pool.fetch_optional(&sql).await?;
+///         // Bind the id — never format it into the SQL text.
+///         let row = self.pool
+///             .fetch_optional_with("SELECT id, name FROM users WHERE id = ?", &[Value::from(id)])
+///             .await?;
 ///         row.map(|r| Ok(User {
 ///             id: r.try_get_i64("id")?,
 ///             name: r.try_get_string("name")?,
@@ -55,8 +57,9 @@ use crate::Pool;
 ///     }
 ///
 ///     async fn delete(&self, id: i64) -> Result<(), DalError> {
-///         let sql = format!("DELETE FROM users WHERE id = {id}");
-///         self.pool.execute(&sql).await?;
+///         self.pool
+///             .execute_with("DELETE FROM users WHERE id = ?", &[Value::from(id)])
+///             .await?;
 ///         Ok(())
 ///     }
 /// }
@@ -81,7 +84,7 @@ pub trait Repository: Send + Sync {
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
     use super::*;
-    use crate::{Pool, Row};
+    use crate::{Pool, Row, Value};
 
     #[allow(dead_code)]
     struct Item {
@@ -99,8 +102,14 @@ mod tests {
         type Id = i64;
 
         async fn find_by_id(&self, id: i64) -> Result<Option<Item>, DalError> {
-            let sql = format!("SELECT id, name FROM items WHERE id = {id}");
-            match self.pool.fetch_optional(&sql).await? {
+            match self
+                .pool
+                .fetch_optional_with(
+                    "SELECT id, name FROM items WHERE id = ?",
+                    &[Value::from(id)],
+                )
+                .await?
+            {
                 Some(r) => Ok(Some(decode_item(&r)?)),
                 None => Ok(None),
             }
@@ -115,8 +124,9 @@ mod tests {
         }
 
         async fn delete(&self, id: i64) -> Result<(), DalError> {
-            let sql = format!("DELETE FROM items WHERE id = {id}");
-            self.pool.execute(&sql).await?;
+            self.pool
+                .execute_with("DELETE FROM items WHERE id = ?", &[Value::from(id)])
+                .await?;
             Ok(())
         }
     }
