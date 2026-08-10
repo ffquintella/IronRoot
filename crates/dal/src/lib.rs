@@ -58,6 +58,7 @@ use std::fmt;
 use async_trait::async_trait;
 use thiserror::Error;
 
+mod placeholder;
 mod pool;
 mod repository;
 mod row;
@@ -88,6 +89,14 @@ pub enum DalError {
         /// Underlying error message.
         message: String,
     },
+
+    /// The statement's placeholders do not match the parameters supplied, or
+    /// use a syntax the active backend does not accept.
+    ///
+    /// Raised before the statement reaches the driver, so the message names
+    /// the actual mistake instead of surfacing a generic bind error.
+    #[error("placeholder mismatch: {0}")]
+    Placeholder(String),
 
     /// The requested entity was not found.
     #[error("not found")]

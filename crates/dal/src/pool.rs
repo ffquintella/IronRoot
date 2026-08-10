@@ -57,6 +57,17 @@ impl Backend {
     }
 }
 
+impl std::fmt::Display for Backend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Backend::Sqlite => "SQLite",
+            Backend::MySql => "MySQL",
+            Backend::Postgres => "Postgres",
+        };
+        f.write_str(name)
+    }
+}
+
 /// Shared rusqlite connection wrapped for async use via `spawn_blocking`.
 #[cfg(feature = "sqlite")]
 #[derive(Clone)]
@@ -219,6 +230,7 @@ impl Pool {
     /// # }
     /// ```
     pub async fn execute_with(&self, sql: &str, params: &[Value]) -> Result<ExecResult, DalError> {
+        crate::placeholder::validate(sql, self.backend(), params.len())?;
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
@@ -271,6 +283,7 @@ impl Pool {
 
     /// Fetch all rows matching the given query, with bind parameters.
     pub async fn fetch_all_with(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>, DalError> {
+        crate::placeholder::validate(sql, self.backend(), params.len())?;
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
@@ -324,6 +337,7 @@ impl Pool {
         sql: &str,
         params: &[Value],
     ) -> Result<Option<Row>, DalError> {
+        crate::placeholder::validate(sql, self.backend(), params.len())?;
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
@@ -464,6 +478,37 @@ mod tests {
 
         let all = pool.fetch_all("SELECT id FROM u").await.unwrap();
         assert_eq!(all.len(), 1, "table survived the injection attempt");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn placeholder_mismatch_is_caught_before_the_driver() {
+        let pool = Pool::connect("sqlite::memory:").await.unwrap();
+        pool.execute("CREATE TABLE p (id INTEGER PRIMARY KEY, a TEXT, b TEXT)")
+            .await
+            .unwrap();
+
+        // Two placeholders, one parameter.
+        let err = pool
+            .fetch_all_with("SELECT * FROM p WHERE a = ? AND b = ?", &[Value::from("x")])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DalError::Placeholder(_)), "{err}");
+
+        // Postgres-style placeholders against SQLite.
+        let err = pool
+            .fetch_all_with("SELECT * FROM p WHERE a = $1", &[Value::from("x")])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DalError::Placeholder(_)), "{err}");
+
+        // A `?` inside a literal is not a placeholder, so this is well-formed.
+        pool.fetch_all_with(
+            "SELECT * FROM p WHERE a = 'why?' AND b = ?",
+            &[Value::from("x")],
+        )
+        .await
+        .expect("literal `?` must not be counted");
     }
 
     #[cfg(feature = "sqlite")]
