@@ -171,7 +171,7 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
         r#"[package]
 name = "{name}"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Bootstrapped by ironroot"
 {bin_section}
 [dependencies]
@@ -193,7 +193,7 @@ members = ["server", "client"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Bootstrapped by ironroot ({name})"
 "#,
         name = cfg.name,
