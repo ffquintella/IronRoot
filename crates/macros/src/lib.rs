@@ -25,7 +25,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{DeriveInput, parse_macro_input};
 
 /// Derives [`ironroot_core::Entity`] for a struct that contains an `id` field.
 ///
@@ -67,13 +67,12 @@ pub fn derive_entity(input: TokenStream) -> TokenStream {
 
     // Extract the type of the `id` field.
     let id_type = match &input.data {
-        syn::Data::Struct(data) => {
-            data.fields
-                .iter()
-                .find(|f| f.ident.as_ref().map(|i| i == "id").unwrap_or(false))
-                .map(|f| f.ty.clone())
-                .unwrap_or_else(|| panic!("#[derive(Entity)] requires a field named `id`"))
-        }
+        syn::Data::Struct(data) => data
+            .fields
+            .iter()
+            .find(|f| f.ident.as_ref().map(|i| i == "id").unwrap_or(false))
+            .map(|f| f.ty.clone())
+            .unwrap_or_else(|| panic!("#[derive(Entity)] requires a field named `id`")),
         _ => panic!("#[derive(Entity)] can only be applied to structs"),
     };
 

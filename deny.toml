@@ -1,0 +1,81 @@
+# cargo-deny configuration — supply-chain gate for the IronRoot workspace.
+#
+# Run locally with:
+#   cargo install cargo-deny
+#   cargo deny check
+#
+# CI runs `advisories`, `bans`, `licenses` and `sources` as separate jobs
+# (.github/workflows/audit.yml) so one failing class does not mask the others.
+
+[graph]
+# Check every backend, not just the default feature set — the DAL's mysql /
+# postgres / sqlite features pull disjoint dependency subtrees.
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+# Every entry here must state *why* it cannot simply be fixed. An entry with
+# no upstream blocker is a bug, not a policy decision — fix the dependency
+# instead of adding to this list.
+ignore = [
+  # quick-xml 0.39.4, reached via hiqlite -> cryptr -> s3-simple.
+  # `cryptr` is a mandatory hiqlite dependency declared with features = ["s3"],
+  # so disabling hiqlite's own backup/s3 features does not drop it, and
+  # s3-simple 0.8.0 pins quick-xml ^0.39 while the fix requires >= 0.41.
+  # There is no newer cryptr or s3-simple release to move to.
+  # Not reachable through IronRoot's API: ironroot-dal-hiqlite exposes no S3 or
+  # backup surface, so the XML parser is compiled but never fed input unless a
+  # downstream application configures hiqlite S3 backup itself.
+  # Re-check whenever hiqlite is bumped; drop this the moment cryptr releases.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+
+  # rkyv 0.7.46 — false positive. rkyv enters Cargo.lock only as an *optional*
+  # dependency of rust_decimal and is never compiled; `cargo tree -i rkyv
+  # --workspace --target all` returns nothing. Advisory scanners read the
+  # lockfile, which cargo resolves independently of feature selection.
+  "RUSTSEC-2026-0235",
+
+  # bincode 2.0.1 unmaintained, via cryptr and hiqlite-wal. Same upstream
+  # blocker as the quick-xml entries above; informational only.
+  "RUSTSEC-2025-0141",
+]
+
+[licenses]
+version = 2
+# The whole tree is permissive today (verified with cargo metadata). Anything
+# copyleft entering the graph should be a deliberate, reviewed decision.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate majors are common in a tree this size (and the RustCrypto stack is
+# mid-migration), so this warns rather than fails. Revisit once argon2 0.6 is
+# released and the rand_core 0.6/0.10 split collapses.
+multiple-versions = "warn"
+wildcards = "deny"
+# Valid values are "lowest-version", "simplest-path" and "all" — anything else
+# fails config deserialization and takes down all four `cargo deny` jobs at once.
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/core",
     "crates/macros",
@@ -13,15 +13,51 @@ members = [
     "crates/new",
     "mcp/servers/example_server",
 ]
+# Starter templates are standalone projects, deliberately not workspace members
+# (see ai/INSTRUCTIONS.md). Each carries its own empty `[workspace]` table;
+# listing them here keeps root-level globs and tooling from reaching into them.
+exclude = [
+    "templates/web-app",
+    "templates/cli-app",
+    "templates/desktop-app",
+]
 
 [workspace.package]
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
+# Floor is set by hiqlite 0.14 (1.95) and sqlx 0.9 (1.94); edition 2024 itself
+# only needs 1.85. Bump deliberately — this is a published framework, and a
+# silent MSRV rise breaks downstream builds with confusing errors.
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/ffquintella/IronRoot"
 authors = ["IronRoot Contributors"]
 
+# Shared dependencies live here so a version bump is a one-line change.
+# Before this existed, `thiserror` was declared independently in four crates
+# and drifted a full major behind. Add anything used by two or more crates.
 [workspace.dependencies]
+# Internal crates — path + version so the workspace stays publishable.
+ironroot-core = { path = "crates/core", version = "0.2.0" }
+ironroot-dal = { path = "crates/dal", version = "0.2.0" }
+
+# Shared third-party.
+async-trait = "0.1"
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
+tempfile = "3"
+thiserror = "2"
+tokio = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+# Deliberately NOT enabled yet: clippy::unwrap_used / expect_used / panic.
+# They are the right policy for a framework, but they currently fire ~66 times,
+# almost entirely on `.unwrap()` in test code where it is idiomatic. Turning
+# them on is a decision to either refactor those call sites or add per-crate
+# `#![cfg_attr(test, allow(...))]`, not something to smuggle in with CI setup.

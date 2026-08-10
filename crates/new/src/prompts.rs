@@ -67,17 +67,22 @@ pub fn ask_choice(
     }
 
     loop {
-        print!("Choose [1-{}, default {}]: ", choices.len(), default_idx + 1);
+        print!(
+            "Choose [1-{}, default {}]: ",
+            choices.len(),
+            default_idx + 1
+        );
         io::stdout().flush().ok();
         let input = read_line()?;
         if input.is_empty() {
             return Ok(choices[default_idx].0.to_string());
         }
         // Accept either the number or the key directly.
-        if let Ok(n) = input.parse::<usize>() {
-            if n >= 1 && n <= choices.len() {
-                return Ok(choices[n - 1].0.to_string());
-            }
+        if let Ok(n) = input.parse::<usize>()
+            && n >= 1
+            && n <= choices.len()
+        {
+            return Ok(choices[n - 1].0.to_string());
         }
         if let Some((key, _)) = choices.iter().find(|(k, _)| *k == input) {
             return Ok(key.to_string());

@@ -19,10 +19,10 @@ is rendered live by [docsify](https://docsify.js.org).
 
 ```bash
 # Unix / macOS
-./docs/serve_docs.sh
+./docs/serve-docs.sh
 
 # Windows
-docs\serve_docs.bat
+docs\serve-docs.bat
 ```
 
 Both scripts try `docsify-cli` first (`npm i -g docsify-cli`) and fall back

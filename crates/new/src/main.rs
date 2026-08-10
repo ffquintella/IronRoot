@@ -73,8 +73,7 @@ fn run() -> Result<(), String> {
         None
     };
 
-    let needs_frontend =
-        matches!(kind, ProjectKind::WebApp) || matches!(gui, Some(Gui::Tauri));
+    let needs_frontend = matches!(kind, ProjectKind::WebApp) || matches!(gui, Some(Gui::Tauri));
     let frontend = if needs_frontend {
         let f = prompts::ask_choice(
             "Which frontend framework?",
@@ -111,10 +110,7 @@ fn run() -> Result<(), String> {
         _ => unreachable!(),
     };
 
-    let target_dir = prompts::ask_string(
-        "Target directory",
-        Some(&format!("./{}", name)),
-    )?;
+    let target_dir = prompts::ask_string("Target directory", Some(&format!("./{}", name)))?;
     let target = PathBuf::from(&target_dir);
 
     let cfg = ProjectConfig {
@@ -158,8 +154,7 @@ fn run() -> Result<(), String> {
         }
     }
 
-    generator::generate(&cfg, &target)
-        .map_err(|e| format!("failed to generate project: {e}"))?;
+    generator::generate(&cfg, &target).map_err(|e| format!("failed to generate project: {e}"))?;
 
     println!();
     println!("Project created at {}", target.display());
@@ -187,9 +182,7 @@ fn validate_name(name: &str) -> Result<(), String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !ok {
-        return Err(
-            "project name must contain only ASCII letters, digits, '-' or '_'".into(),
-        );
+        return Err("project name must contain only ASCII letters, digits, '-' or '_'".into());
     }
     if name.starts_with(|c: char| c.is_ascii_digit()) {
         return Err("project name cannot start with a digit".into());

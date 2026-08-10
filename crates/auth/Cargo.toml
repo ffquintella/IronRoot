@@ -2,6 +2,7 @@
 name = "ironroot-auth"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Authentication primitives for IronRoot — Argon2id password hashing with optional ML-KEM (post-quantum) sealing"
 
@@ -10,22 +11,33 @@ default = ["dal", "pq-seal"]
 # Integrate with ironroot-dal for a SQL-backed user repository.
 dal = ["dep:ironroot-dal"]
 # Enable post-quantum sealing of stored password hashes (ML-KEM-768 + ChaCha20-Poly1305).
-pq-seal = ["dep:ml-kem", "dep:chacha20poly1305", "dep:sha2"]
+pq-seal = ["dep:ml-kem", "dep:chacha20poly1305", "dep:sha2", "dep:hkdf", "dep:base64"]
 
 [dependencies]
 argon2 = "0.5"
 password-hash = { version = "0.5", features = ["std"] }
+# Pinned to 0.6 by `argon2 0.5` / `password-hash 0.5` (the latest stable
+# release of that stack) — used for Argon2id salt generation in `password.rs`.
 rand_core = { version = "0.6", features = ["std"] }
-rand = "0.8"
-thiserror = "1"
-async-trait = "0.1"
-tracing = "0.1"
+# The newer RustCrypto generation (ml-kem/sha2/chacha20poly1305) is on
+# rand_core 0.10; `rand 0.10` matches it and is used only by `pq.rs`.
+rand = "0.10"
+thiserror.workspace = true
+async-trait.workspace = true
+zeroize = { version = "1", features = ["alloc"] }
+tracing.workspace = true
 
 # Optional, behind feature flags.
-ironroot-dal = { path = "../dal", optional = true }
-ml-kem = { version = "0.2", optional = true }
-chacha20poly1305 = { version = "0.10", optional = true }
-sha2 = { version = "0.10", optional = true }
+ironroot-dal = { workspace = true, optional = true }
+# `zeroize` makes ml-kem wipe the decapsulation key on drop.
+ml-kem = { version = "0.3", features = ["zeroize"], optional = true }
+chacha20poly1305 = { version = "0.11", optional = true }
+sha2 = { version = "0.11", optional = true }
+hkdf = { version = "0.13", optional = true }
+base64 = { version = "0.23", optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

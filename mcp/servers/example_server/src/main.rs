@@ -65,9 +65,8 @@ fn main() {
 
         // TODO: Parse as JSON-RPC, route to appropriate handler, and write a
         // proper JSON-RPC response.
-        let response = format!(
-            r#"{{"jsonrpc":"2.0","id":null,"error":{{"code":-32601,"message":"Method not implemented yet. See mcp/README.md for the roadmap."}}}}"#
-        );
+        let response = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"Method not implemented yet. See mcp/README.md for the roadmap."}}"#
+            .to_string();
 
         writeln!(out, "{response}").unwrap_or_else(|e| {
             eprintln!("[ironroot-mcp] error writing stdout: {e}");

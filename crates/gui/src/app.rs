@@ -17,7 +17,9 @@ pub struct GuiApp {
 impl GuiApp {
     /// Creates a new desktop application with the given window `title`.
     pub fn new(title: impl Into<String>) -> Self {
-        GuiApp { title: title.into() }
+        GuiApp {
+            title: title.into(),
+        }
     }
 
     /// Returns the window title.

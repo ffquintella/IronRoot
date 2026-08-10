@@ -2,8 +2,12 @@
 name = "ironroot-web"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Web layer abstractions for the IronRoot framework"
 
 [dependencies]
-ironroot-core = { path = "../core" }
+ironroot-core.workspace = true
+
+[lints]
+workspace = true

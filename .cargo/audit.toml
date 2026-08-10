@@ -1,0 +1,28 @@
+# cargo-audit configuration.
+#
+# cargo-audit and cargo-deny read the same RUSTSEC database but NOT the same
+# config: cargo-audit never looks at deny.toml. Without this file the four
+# advisories deliberately exempted there are re-reported here, `cargo audit`
+# fails on every run, and a permanently red gate stops being a gate.
+#
+# This list must be kept in step with `[advisories].ignore` in deny.toml. The
+# justification for each entry lives there — do not add an ID here that is not
+# also justified there.
+#
+# Run locally with:
+#   cargo install cargo-audit
+#   cargo audit
+
+[advisories]
+ignore = [
+  # quick-xml 0.39.4 via hiqlite -> cryptr -> s3-simple; no fixed release to
+  # move to, and ironroot-dal-hiqlite exposes no S3 or backup surface.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+
+  # rkyv 0.7.46 — optional dependency of rust_decimal that is never compiled.
+  "RUSTSEC-2026-0235",
+
+  # bincode 2.0.1 unmaintained, via cryptr and hiqlite-wal. Informational.
+  "RUSTSEC-2025-0141",
+]

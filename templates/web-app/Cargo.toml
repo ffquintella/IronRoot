@@ -1,9 +1,27 @@
+# This template is a standalone project, not a member of the IronRoot
+# workspace. The empty table makes it its own workspace root so `cargo build`
+# works from this directory instead of failing on the repository root manifest.
+[workspace]
+
 [package]
 name = "ironroot-web-app"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "IronRoot web application template"
 
 # TODO: Add ironroot-web dependency once published to crates.io
 # [dependencies]
 # ironroot-web = "0.1"
+
+# BDD layer required by AGENTS.md §4.2. `futures` only supplies the executor
+# that drives cucumber's async runner from `fn main` in `tests/bdd.rs`; cucumber
+# already depends on it, so it costs nothing extra in the dependency graph.
+[dev-dependencies]
+cucumber = "0.23"
+futures = "0.3"
+
+# cucumber ships its own runner, so this target opts out of the libtest harness
+# and is driven by `fn main` in `tests/bdd.rs`.
+[[test]]
+name = "bdd"
+harness = false

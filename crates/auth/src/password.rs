@@ -24,7 +24,11 @@ pub struct PasswordHasher {
 
 impl Default for PasswordHasher {
     fn default() -> Self {
-        // RFC 9106 recommended defaults for interactive scenarios.
+        // OWASP's *minimum* recommended Argon2id parameters (m=19 MiB, t=2,
+        // p=1) — not RFC 9106's, whose two options are t=1/m=2 GiB/p=4 and
+        // t=3/m=64 MiB/p=4. These are a floor chosen so the defaults stay
+        // usable on small hosts; raise them with `with_params` if your
+        // deployment can afford it.
         let params = Params::new(
             19 * 1024, // m_cost (KiB) — 19 MiB
             2,         // t_cost

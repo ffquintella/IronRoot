@@ -42,18 +42,32 @@
 //! it on your domain types to get a uniform CRUD-style interface, regardless
 //! of the backend in use.
 
+// With no backend selected, `Pool` degenerates to an empty enum and every
+// `match` over it fails as non-exhaustive — a wall of E0004 that says nothing
+// about the actual mistake. Fail loudly and usefully instead.
+#[cfg(not(any(feature = "sqlite", feature = "mysql", feature = "postgres")))]
+compile_error!(
+    "ironroot-dal needs at least one backend feature enabled: \
+     `sqlite`, `mysql`, or `postgres`. The default feature set enables \
+     `sqlite` and `mysql`; if you passed `--no-default-features`, re-add the \
+     backend you want with `--features <backend>`."
+);
+
 use std::fmt;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
+mod placeholder;
 mod pool;
 mod repository;
 mod row;
+mod value;
 
 pub use pool::{Backend, Pool};
 pub use repository::Repository;
 pub use row::Row;
+pub use value::Value;
 
 /// Top-level error type returned by all DAL operations.
 #[derive(Debug, Error)]
@@ -75,6 +89,14 @@ pub enum DalError {
         /// Underlying error message.
         message: String,
     },
+
+    /// The statement's placeholders do not match the parameters supplied, or
+    /// use a syntax the active backend does not accept.
+    ///
+    /// Raised before the statement reaches the driver, so the message names
+    /// the actual mistake instead of surfacing a generic bind error.
+    #[error("placeholder mismatch: {0}")]
+    Placeholder(String),
 
     /// The requested entity was not found.
     #[error("not found")]
@@ -119,11 +141,32 @@ pub trait DalPool: Send + Sync {
     fn backend(&self) -> Backend;
 
     /// Execute a statement that does not return rows.
+    ///
+    /// Prefer [`DalPool::execute_with`] when the statement includes dynamic
+    /// data — this method sends `sql` verbatim.
     async fn execute(&self, sql: &str) -> Result<ExecResult, DalError>;
 
+    /// Execute a non-row-returning statement with bind parameters.
+    async fn execute_with(&self, sql: &str, params: &[Value]) -> Result<ExecResult, DalError>;
+
     /// Fetch all rows matching the query.
+    ///
+    /// Prefer [`DalPool::fetch_all_with`] when the query includes dynamic data.
     async fn fetch_all(&self, sql: &str) -> Result<Vec<Row>, DalError>;
 
+    /// Fetch all rows matching the query, with bind parameters.
+    async fn fetch_all_with(&self, sql: &str, params: &[Value]) -> Result<Vec<Row>, DalError>;
+
     /// Fetch at most one row.
+    ///
+    /// Prefer [`DalPool::fetch_optional_with`] when the query includes
+    /// dynamic data.
     async fn fetch_optional(&self, sql: &str) -> Result<Option<Row>, DalError>;
+
+    /// Fetch at most one row, with bind parameters.
+    async fn fetch_optional_with(
+        &self,
+        sql: &str,
+        params: &[Value],
+    ) -> Result<Option<Row>, DalError>;
 }

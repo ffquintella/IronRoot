@@ -32,6 +32,7 @@
 - [x] Scaffold `templates/web-app`
 - [x] Scaffold `templates/cli-app`
 - [x] Scaffold `templates/desktop-app`
+- [x] Make all three templates pass their own AGENTS.md §4 gate as shipped (unit + BDD layers, coverage above 80%)
 - [ ] Implement real routing in `web-app` template (using `ironroot-web`)
 - [ ] Implement command dispatch in `cli-app` template (using `ironroot-cli`)
 - [ ] Integrate egui or Tauri into `desktop-app` template (using `ironroot-gui`)

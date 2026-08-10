@@ -1,0 +1,39 @@
+version: 2
+
+# Pinning actions to a commit SHA stops tag hijacking, but a pin nobody updates
+# is a pin that quietly rots past the security fix it was meant to protect.
+# Dependabot rewrites the SHA *and* the trailing `# vX.Y.Z` comment, so the
+# workflows stay both pinned and current.
+#
+# Every ecosystem sets a cooldown. The compromise pattern that matters here is a
+# maintainer account takeover followed by an immediate malicious release: the
+# window between publication and the ecosystem noticing is measured in hours,
+# and a same-day automated bump walks straight into it. Waiting a week costs
+# nothing on a weekly schedule and puts the advisory ahead of the upgrade.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    labels: [dependencies, ci]
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencies]
+    # AGENTS.md §5.4 wants patch-level updates at least quarterly and a
+    # deliberate review for anything larger; group the noise, surface the rest.
+    groups:
+      patch-updates:
+        update-types: [patch]

@@ -1,7 +1,8 @@
 [package]
 name = "ironroot-dal-hiqlite"
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.95"
 license = "MIT"
 description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-dal"
 
@@ -15,6 +16,9 @@ description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-da
 # small `DalError` / `ExecResult` shapes are duplicated, intentionally.
 
 [dependencies]
-hiqlite = { version = "0.13", default-features = false, features = ["sqlite"] }
-thiserror = "1"
-tracing = "0.1"
+hiqlite = { version = "0.14", default-features = false, features = ["sqlite"] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
