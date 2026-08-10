@@ -6,10 +6,29 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege by default. A job that needs more asks for it explicitly.
+permissions:
+  contents: read
+
+# A force-push to a PR branch supersedes the previous run; keep the newest only.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# Third-party actions are pinned to a full commit SHA, not a tag. A tag is
+# mutable: whoever controls the action repository can repoint `v2` at new code
+# and it runs here with our token. The trailing comment records the human-
+# readable version the SHA corresponds to; .github/dependabot.yml keeps both
+# in sync.
+#
+# Matrix values reach `run:` through `env:` rather than direct `${{ }}`
+# interpolation. These particular values are static and workspace-defined, so
+# nothing untrusted flows in today — but the habit is what stops the day someone
+# adds a matrix entry derived from a branch name or an event payload.
 jobs:
   check:
     name: ${{ matrix.name }}
@@ -31,12 +50,19 @@ jobs:
             cmd: cargo doc --workspace --no-deps
             components: ""
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
+          # Do not leave the job token in .git/config, where any later step —
+          # or anything that archives the workspace — can read it back out.
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master@2026-01
+        with:
+          toolchain: stable
           components: ${{ matrix.components }}
-      - uses: Swatinem/rust-cache@v2
-      - run: ${{ matrix.cmd }}
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.3
+      - env:
+          CMD: ${{ matrix.cmd }}
+        run: $CMD
 
   # The DAL's feature flags select mutually independent backends; a plain
   # `--workspace` build only ever exercises the default set.
@@ -52,16 +78,26 @@ jobs:
           - "--no-default-features --features postgres"
           - "--all-features"
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p ironroot-dal ${{ matrix.features }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master@2026-01
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.3
+      - env:
+          FEATURES: ${{ matrix.features }}
+        run: cargo check -p ironroot-dal $FEATURES
 
   msrv:
     name: MSRV
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master@2026-01
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.3
       - run: cargo check --workspace --all-targets

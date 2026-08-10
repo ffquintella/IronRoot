@@ -7,27 +7,54 @@ on:
     # commits — which is exactly how the pre-0.2.1 backlog accumulated.
     - cron: "0 6 * * 1"
   push:
+    # Branch-scoped on purpose. Without this, a push to a PR branch and the
+    # pull_request event both fired and every audit job ran twice.
+    branches: [main]
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - ".github/workflows/audit.yml"
       - "deny.toml"
+      - ".cargo/audit.toml"
   pull_request:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".github/workflows/audit.yml"
+      - "deny.toml"
+      - ".cargo/audit.toml"
   workflow_dispatch:
+
+# Least privilege by default; jobs that need to write ask for it below.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
+# Actions are pinned to a full commit SHA — see the note in ci.yml.
 jobs:
+  # RUSTSEC advisories against Cargo.lock. Exemptions live in
+  # .cargo/audit.toml, which mirrors the reviewed ignore list in deny.toml;
+  # cargo-audit does not read deny.toml, so the two files must be kept in step.
   audit:
     name: cargo audit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # rustsec/audit-check publishes its result as a check run. Without this
+      # the action fails with "Resource not accessible by integration" after
+      # doing all the work.
+      checks: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: rustsec/audit-check@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -39,7 +66,53 @@ jobs:
       matrix:
         checks: [advisories, bans, licenses, sources]
     steps:
-      - uses: actions/checkout@v5
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2.0.14
         with:
           command: check ${{ matrix.checks }}
+
+  # Blocks a pull request that introduces a dependency with a known advisory or
+  # a licence outside the allow-list — at review time, before it reaches
+  # Cargo.lock on main. cargo-deny catches the same class after the fact; this
+  # puts the finding on the diff that caused it.
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.8.3
+        with:
+          fail-on-severity: low
+          comment-summary-in-pr: on-failure
+          # Kept deliberately in step with the `allow` list in deny.toml.
+          allow-licenses: >-
+            0BSD, Apache-2.0, Apache-2.0 WITH LLVM-exception, BSD-2-Clause,
+            BSD-3-Clause, BSL-1.0, CC0-1.0, CDLA-Permissive-2.0, ISC, MIT,
+            MIT-0, Unicode-3.0, Unlicense, Zlib
+
+  # Static analysis of the workflows themselves. CI runs with a token and,
+  # historically, with far more permission than any job needed; zizmor catches
+  # unpinned actions, over-broad permissions, credential persistence, and
+  # expression-injection sinks before they are exploitable.
+  #
+  # Version-pinned: an unpinned linter turns every upstream release into a
+  # surprise red build on an unrelated pull request.
+  workflows:
+    name: workflow audit (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
+        with:
+          persist-credentials: false
+      # --offline keeps the gate deterministic and off the API rate limit; the
+      # online audits only add checks about upstream repo state.
+      - run: pipx install zizmor==1.29.0
+      - run: zizmor --no-progress --offline .github/workflows/

@@ -71,7 +71,9 @@ confidence-threshold = 0.8
 # released and the rand_core 0.6/0.10 split collapses.
 multiple-versions = "warn"
 wildcards = "deny"
-highlight = "all-duplicates"
+# Valid values are "lowest-version", "simplest-path" and "all" — anything else
+# fails config deserialization and takes down all four `cargo deny` jobs at once.
+highlight = "all"
 
 [sources]
 unknown-registry = "deny"
