@@ -1,3 +1,8 @@
+# This template is a standalone project, not a member of the IronRoot
+# workspace. The empty table makes it its own workspace root so `cargo build`
+# works from this directory instead of failing on the repository root manifest.
+[workspace]
+
 [package]
 name = "ironroot-desktop-app"
 version = "0.1.0"

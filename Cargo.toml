@@ -13,6 +13,14 @@ members = [
     "crates/new",
     "mcp/servers/example_server",
 ]
+# Starter templates are standalone projects, deliberately not workspace members
+# (see ai/INSTRUCTIONS.md). Each carries its own empty `[workspace]` table;
+# listing them here keeps root-level globs and tooling from reaching into them.
+exclude = [
+    "templates/web-app",
+    "templates/cli-app",
+    "templates/desktop-app",
+]
 
 [workspace.package]
 version = "0.2.0"
