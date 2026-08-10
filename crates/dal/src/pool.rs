@@ -68,43 +68,165 @@ impl std::fmt::Display for Backend {
     }
 }
 
-/// Shared rusqlite connection wrapped for async use via `spawn_blocking`.
+/// Where a SQLite pool points.
+#[cfg(feature = "sqlite")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SqliteTarget {
+    /// A private in-memory database.
+    Memory,
+    /// A database file on disk.
+    File(std::path::PathBuf),
+}
+
+/// deadpool manager that opens and hands out rusqlite connections.
+#[cfg(feature = "sqlite")]
+#[derive(Debug)]
+struct SqliteManager {
+    target: SqliteTarget,
+}
+
+/// A pooled connection. `rusqlite::Connection` is `Send` but not `Sync`, and
+/// every call into it blocks, so it lives behind an `Arc<Mutex<_>>` that can be
+/// cloned into `spawn_blocking`.
+#[cfg(feature = "sqlite")]
+type PooledConn = Arc<Mutex<rusqlite::Connection>>;
+
+#[cfg(feature = "sqlite")]
+impl deadpool::managed::Manager for SqliteManager {
+    type Type = PooledConn;
+    type Error = DalError;
+
+    async fn create(&self) -> Result<PooledConn, DalError> {
+        let target = self.target.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = match target {
+                SqliteTarget::Memory => rusqlite::Connection::open_in_memory(),
+                SqliteTarget::File(path) => rusqlite::Connection::open(path),
+            }
+            .map_err(map_rusqlite)?;
+            // A pool means concurrent writers, and SQLite fails a busy write
+            // immediately unless a timeout is set. Without this, adding the
+            // pool would turn contention into spurious SQLITE_BUSY errors.
+            conn.busy_timeout(std::time::Duration::from_secs(5))
+                .map_err(map_rusqlite)?;
+            Ok::<_, DalError>(Arc::new(Mutex::new(conn)))
+        })
+        .await
+        .map_err(|e| DalError::Database(e.to_string()))?
+    }
+
+    async fn recycle(
+        &self,
+        _conn: &mut PooledConn,
+        _metrics: &deadpool::managed::Metrics,
+    ) -> deadpool::managed::RecycleResult<DalError> {
+        // Deliberately a no-op. A local SQLite handle does not go stale the way
+        // a network connection does, and a failed recycle would make deadpool
+        // drop and reopen the connection — which for `:memory:` would silently
+        // discard the entire database.
+        Ok(())
+    }
+}
+
+/// Connection pool for SQLite, backed by [`deadpool`].
 #[cfg(feature = "sqlite")]
 #[derive(Clone)]
 pub struct SqlitePool {
-    conn: Arc<Mutex<rusqlite::Connection>>,
+    pool: deadpool::managed::Pool<SqliteManager>,
 }
 
 #[cfg(feature = "sqlite")]
 impl std::fmt::Debug for SqlitePool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SqlitePool").finish_non_exhaustive()
+        f.debug_struct("SqlitePool")
+            .field("status", &self.pool.status())
+            .finish_non_exhaustive()
     }
 }
+
+/// Default pool size for file-backed databases. SQLite serialises writers, so
+/// a large pool buys little; this leaves room for concurrent readers without
+/// encouraging write contention.
+#[cfg(feature = "sqlite")]
+const DEFAULT_SQLITE_POOL_SIZE: usize = 8;
 
 #[cfg(feature = "sqlite")]
 impl SqlitePool {
     /// Open from a connection URL (`sqlite::memory:`, `sqlite:path.db`, `sqlite:///abs/path`).
+    ///
+    /// In-memory databases are pooled with a maximum size of one: each SQLite
+    /// connection to `:memory:` gets its *own* private database, so a larger
+    /// pool would hand out connections to different, empty databases.
     pub fn open(url: &str) -> Result<Self, DalError> {
-        let conn = open_sqlite(url)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
+        let target = parse_sqlite_target(url)?;
+        let max_size = match target {
+            SqliteTarget::Memory => 1,
+            SqliteTarget::File(_) => DEFAULT_SQLITE_POOL_SIZE,
+        };
+        Self::build(target, max_size)
+    }
+
+    /// Open with an explicit maximum pool size.
+    ///
+    /// Ignored for in-memory databases, which are always capped at one
+    /// connection for the reason given on [`SqlitePool::open`].
+    pub fn open_with_max_size(url: &str, max_size: usize) -> Result<Self, DalError> {
+        let target = parse_sqlite_target(url)?;
+        let max_size = match target {
+            SqliteTarget::Memory => 1,
+            SqliteTarget::File(_) => max_size.max(1),
+        };
+        Self::build(target, max_size)
+    }
+
+    fn build(target: SqliteTarget, max_size: usize) -> Result<Self, DalError> {
+        let pool = deadpool::managed::Pool::builder(SqliteManager { target })
+            .max_size(max_size)
+            .build()
+            .map_err(|e| DalError::Database(e.to_string()))?;
+        Ok(Self { pool })
+    }
+
+    /// Check out a connection and run a blocking rusqlite closure on it.
+    ///
+    /// The pooled object is held for the whole call, so the connection is not
+    /// returned to the pool while the closure is still using it.
+    async fn interact<F, R>(&self, f: F) -> Result<R, DalError>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<R, DalError> + Send + 'static,
+        R: Send + 'static,
+    {
+        let obj = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| DalError::Database(format!("sqlite pool: {e}")))?;
+        let conn = PooledConn::clone(&obj);
+        let result = tokio::task::spawn_blocking(move || {
+            let guard = conn
+                .lock()
+                .map_err(|_| DalError::Database("sqlite mutex poisoned".into()))?;
+            f(&guard)
         })
+        .await
+        .map_err(|e| DalError::Database(e.to_string()))?;
+        drop(obj);
+        result
     }
 }
 
 #[cfg(feature = "sqlite")]
-fn open_sqlite(url: &str) -> Result<rusqlite::Connection, DalError> {
+fn parse_sqlite_target(url: &str) -> Result<SqliteTarget, DalError> {
     let rest = url
         .strip_prefix("sqlite:")
         .ok_or_else(|| DalError::UnsupportedUrl(url.to_string()))?;
-    let conn = if rest == ":memory:" || rest.is_empty() {
-        rusqlite::Connection::open_in_memory()
+    if rest == ":memory:" || rest.is_empty() {
+        Ok(SqliteTarget::Memory)
     } else {
-        let path = rest.trim_start_matches("//");
-        rusqlite::Connection::open(path)
-    };
-    conn.map_err(|e| DalError::Database(e.to_string()))
+        Ok(SqliteTarget::File(
+            rest.trim_start_matches("//").to_string().into(),
+        ))
+    }
 }
 
 #[cfg(feature = "sqlite")]
@@ -196,7 +318,7 @@ impl Pool {
     pub async fn close(&self) {
         match self {
             #[cfg(feature = "sqlite")]
-            Pool::Sqlite(_) => { /* rusqlite connection drops with the Arc */ }
+            Pool::Sqlite(p) => p.pool.close(),
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => p.close().await,
             #[cfg(feature = "postgres")]
@@ -234,22 +356,20 @@ impl Pool {
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
-                let conn = p.conn.clone();
                 let sql = sql.to_string();
                 let params = params.to_vec();
-                tokio::task::spawn_blocking(move || {
-                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                // `last_insert_rowid` is per-connection, so it must be read on
+                // the same pooled connection that ran the INSERT.
+                p.interact(move |conn| {
                     let rows = conn
                         .execute(&sql, rusqlite::params_from_iter(params.iter()))
                         .map_err(map_rusqlite)?;
-                    let last_id = conn.last_insert_rowid();
-                    Ok::<_, DalError>(ExecResult {
+                    Ok(ExecResult {
                         rows_affected: rows as u64,
-                        last_insert_id: Some(last_id),
+                        last_insert_id: Some(conn.last_insert_rowid()),
                     })
                 })
                 .await
-                .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
@@ -287,11 +407,9 @@ impl Pool {
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
-                let conn = p.conn.clone();
                 let sql = sql.to_string();
                 let params = params.to_vec();
-                tokio::task::spawn_blocking(move || {
-                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                p.interact(move |conn| {
                     let mut stmt = conn.prepare(&sql).map_err(map_rusqlite)?;
                     let mut rows = stmt
                         .query(rusqlite::params_from_iter(params.iter()))
@@ -301,10 +419,9 @@ impl Pool {
                         let r = crate::row::SqliteRow::from_row(row).map_err(map_rusqlite)?;
                         out.push(Row::from_sqlite(r));
                     }
-                    Ok::<_, DalError>(out)
+                    Ok(out)
                 })
                 .await
-                .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
@@ -341,11 +458,9 @@ impl Pool {
         match self {
             #[cfg(feature = "sqlite")]
             Pool::Sqlite(p) => {
-                let conn = p.conn.clone();
                 let sql = sql.to_string();
                 let params = params.to_vec();
-                tokio::task::spawn_blocking(move || {
-                    let conn = conn.lock().expect("sqlite mutex poisoned");
+                p.interact(move |conn| {
                     let mut stmt = conn.prepare(&sql).map_err(map_rusqlite)?;
                     let mut rows = stmt
                         .query(rusqlite::params_from_iter(params.iter()))
@@ -356,10 +471,9 @@ impl Pool {
                         }
                         None => None,
                     };
-                    Ok::<_, DalError>(opt.map(Row::from_sqlite))
+                    Ok(opt.map(Row::from_sqlite))
                 })
                 .await
-                .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => Ok(
@@ -478,6 +592,76 @@ mod tests {
 
         let all = pool.fetch_all("SELECT id FROM u").await.unwrap();
         assert_eq!(all.len(), 1, "table survived the injection attempt");
+    }
+
+    /// Every connection to `:memory:` opens its *own* private database, so a
+    /// pool larger than one would hand out connections to different, empty
+    /// databases. Writes must stay visible to subsequent reads.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn in_memory_pool_keeps_one_shared_database() {
+        let pool = Pool::connect("sqlite::memory:").await.unwrap();
+        pool.execute("CREATE TABLE m (id INTEGER PRIMARY KEY, v TEXT)")
+            .await
+            .unwrap();
+        pool.execute_with("INSERT INTO m (v) VALUES (?)", &[Value::from("kept")])
+            .await
+            .unwrap();
+
+        // Several checkouts in a row must all observe the same database.
+        for _ in 0..5 {
+            let rows = pool.fetch_all("SELECT v FROM m").await.unwrap();
+            assert_eq!(rows.len(), 1, "in-memory database was not shared");
+            assert_eq!(rows[0].try_get_string("v").unwrap(), "kept");
+        }
+    }
+
+    /// A file-backed pool should genuinely overlap work rather than serialising
+    /// every query behind a single connection.
+    #[cfg(feature = "sqlite")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file_backed_pool_serves_concurrent_queries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pool.db");
+        let url = format!("sqlite:{}", path.display());
+
+        let pool = Pool::connect(&url).await.unwrap();
+        pool.execute("CREATE TABLE c (id INTEGER PRIMARY KEY, v INTEGER)")
+            .await
+            .unwrap();
+        for i in 0..20_i64 {
+            pool.execute_with("INSERT INTO c (v) VALUES (?)", &[Value::from(i)])
+                .await
+                .unwrap();
+        }
+
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let pool = pool.clone();
+            handles.push(tokio::spawn(async move {
+                let rows = pool.fetch_all("SELECT v FROM c").await.unwrap();
+                rows.len()
+            }));
+        }
+        for h in handles {
+            assert_eq!(h.await.unwrap(), 20);
+        }
+
+        // Concurrent writers must not fail with SQLITE_BUSY either.
+        let mut writers = Vec::new();
+        for i in 100..116_i64 {
+            let pool = pool.clone();
+            writers.push(tokio::spawn(async move {
+                pool.execute_with("INSERT INTO c (v) VALUES (?)", &[Value::from(i)])
+                    .await
+            }));
+        }
+        for w in writers {
+            w.await.unwrap().expect("concurrent write should not fail");
+        }
+
+        let rows = pool.fetch_all("SELECT v FROM c").await.unwrap();
+        assert_eq!(rows.len(), 36);
     }
 
     #[cfg(feature = "sqlite")]

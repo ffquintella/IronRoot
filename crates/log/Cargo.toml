@@ -20,7 +20,7 @@ thiserror.workspace = true
 syslog = { version = "7", optional = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 [lints]
 workspace = true

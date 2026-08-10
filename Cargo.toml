@@ -38,6 +38,7 @@ async-trait = "0.1"
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "3", features = ["full"] }
+tempfile = "3"
 thiserror = "2"
 tokio = "1"
 tracing = "0.1"

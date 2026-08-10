@@ -1943,10 +1943,12 @@ name = "ironroot-dal"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "deadpool",
  "rusqlite",
  "sqlx-core",
  "sqlx-mysql",
  "sqlx-postgres",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
