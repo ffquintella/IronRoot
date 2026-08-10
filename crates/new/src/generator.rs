@@ -15,6 +15,7 @@ pub fn generate(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(root, "AGENTS.md", &agents_md(cfg))?;
     write(root, "rust-toolchain.toml", RUST_TOOLCHAIN)?;
     write(root, ".env.example", &env_example(cfg))?;
+    scaffold_docs(cfg, root)?;
 
     match cfg.kind {
         ProjectKind::ClientTool => scaffold_cli(cfg, root)?,
@@ -76,7 +77,11 @@ fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     fs::create_dir_all(client.join("tests"))?;
     write(&client, "Cargo.toml", &client_cargo_toml(cfg))?;
     let gui = cfg.gui.expect("client/server must have a gui");
-    write(&client.join("src"), "main.rs", &client_main_rs(gui, &cfg.name))?;
+    write(
+        &client.join("src"),
+        "main.rs",
+        &client_main_rs(gui, &cfg.name),
+    )?;
     write(&client.join("tests"), "smoke.rs", CLIENT_SMOKE_TEST)?;
     scaffold_bdd(&client.join("tests"), ProjectKind::ClientServer)?;
     Ok(())
@@ -90,6 +95,24 @@ fn scaffold_bdd(tests_dir: &Path, _kind: ProjectKind) -> io::Result<()> {
     fs::create_dir_all(&features)?;
     write(&features, "arithmetic.feature", BDD_FEATURE)?;
     write(tests_dir, "bdd.rs", BDD_RUNNER)?;
+    Ok(())
+}
+
+/// Drop a docsify-backed `docs/` site into the project root, plus the
+/// `serve-docs.sh` / `serve-docs.bat` helper launchers. The site renders the
+/// project's own Markdown live (docsify-cli if available, else `http.server`).
+fn scaffold_docs(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
+    let docs = root.join("docs");
+    fs::create_dir_all(&docs)?;
+    write(&docs, ".nojekyll", "")?;
+    write(&docs, "index.html", &docs_index_html(cfg))?;
+    write(&docs, "README.md", &docs_readme(cfg))?;
+    write(&docs, "_sidebar.md", DOCS_SIDEBAR)?;
+    write(&docs, "_navbar.md", DOCS_NAVBAR)?;
+    write(&docs, "getting-started.md", &docs_getting_started(cfg))?;
+    write(&docs, "architecture.md", &docs_architecture(cfg))?;
+    write_exec(&docs, "serve-docs.sh", DOCS_SERVE_SH)?;
+    write(&docs, "serve-docs.bat", DOCS_SERVE_BAT)?;
     Ok(())
 }
 
@@ -137,7 +160,10 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
         ));
     }
     let bin_section = if kind == "bin" {
-        format!("\n[[bin]]\nname = \"{}\"\npath = \"src/main.rs\"\n", cfg.name)
+        format!(
+            "\n[[bin]]\nname = \"{}\"\npath = \"src/main.rs\"\n",
+            cfg.name
+        )
     } else {
         String::new()
     };
@@ -476,7 +502,6 @@ async fn main() {
 }
 "#;
 
-
 /// Dependency block giving generated projects working file-rotating logging
 /// (10 MB rotation, 5 retained files) — mirrors `ironroot-log`'s defaults.
 const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
@@ -586,7 +611,7 @@ frontend-build:
     };
 
     format!(
-        r#".PHONY: build test bdd run fmt lint check clean
+        r#".PHONY: build test bdd run fmt lint check clean docs
 
 build:
 	cargo build --workspace
@@ -613,6 +638,10 @@ check:
 
 clean:
 	cargo clean
+
+# Serve the docsify documentation site on http://localhost:3000
+docs:
+	./docs/serve-docs.sh
 {frontend_section}"#,
     )
 }
@@ -632,6 +661,7 @@ fn readme(cfg: &ProjectConfig) -> String {
     if cfg.frontend.is_some() {
         layout.push_str("- `frontend/` — JS/TS frontend\n");
     }
+    layout.push_str("- `docs/` — docsify documentation site (`make docs`)\n");
 
     format!(
         r#"# {name}
@@ -653,6 +683,7 @@ make build
 make test     # unit + integration + BDD
 make bdd      # just the Gherkin scenarios
 make run
+make docs     # serve the docsify docs on http://localhost:3000
 ```
 
 ## Testing
@@ -791,6 +822,305 @@ Two layers ship by default — use **both**:
     )
 }
 
+// --- docs renderers --------------------------------------------------------
+
+fn docs_index_html(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{name} — Documentation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0" />
+    <meta name="description" content="{name} — bootstrapped by ironroot" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css" />
+    <style>
+      :root {{
+        --theme-color: #c75c2b;
+      }}
+      .sidebar > h1 {{ font-size: 1.3rem; }}
+      .markdown-section pre > code {{ font-size: 0.85rem; }}
+    </style>
+  </head>
+  <body>
+    <div id="app">Loading…</div>
+    <script>
+      window.$docsify = {{
+        name: '{name}',
+        loadSidebar: true,
+        loadNavbar: true,
+        subMaxLevel: 3,
+        auto2top: true,
+        homepage: 'README.md',
+        search: {{
+          maxAge: 86400000,
+          paths: 'auto',
+          placeholder: 'Search…',
+          noData: 'No results.',
+          depth: 4,
+        }},
+        copyCode: {{
+          buttonText: 'Copy',
+          errorText: 'Error',
+          successText: 'Copied',
+        }},
+        pagination: {{
+          previousText: '← Previous',
+          nextText: 'Next →',
+          crossChapter: true,
+        }},
+      }};
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docsify-pagination@2/dist/docsify-pagination.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-rust.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-toml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  </body>
+</html>
+"#,
+        name = cfg.name,
+    )
+}
+
+fn docs_readme(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# {name}
+
+> Bootstrapped by **ironroot**.
+
+Welcome to the **{name}** documentation. The content is plain Markdown under
+`docs/` and is rendered live by [docsify](https://docsify.js.org).
+
+## Quick links
+
+- [Getting started](getting-started.md) — build, test, and run
+- [Architecture](architecture.md) — how this project is laid out
+
+## Reading the docs locally
+
+```bash
+# Unix / macOS
+./docs/serve-docs.sh
+
+# Windows
+docs\serve-docs.bat
+```
+
+Both scripts try `docsify-cli` first (`npm i -g docsify-cli`) and fall back
+to Python's `http.server` if Node is not available. Then open
+<http://localhost:3000>.
+
+## Project status
+
+- Project kind : {kind}
+{gui_line}{frontend_line}- Database     : {db}
+
+See [AGENTS.md](../AGENTS.md) for AI-assistant guidance.
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+        gui_line = cfg
+            .gui
+            .map(|g| format!("- GUI         : {}\n", g.label()))
+            .unwrap_or_default(),
+        frontend_line = cfg
+            .frontend
+            .map(|f| format!("- Frontend    : {}\n", f.label()))
+            .unwrap_or_default(),
+        db = cfg.database.label(),
+    )
+}
+
+fn docs_getting_started(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# Getting started
+
+## Prerequisites
+
+- A recent stable Rust toolchain (see `rust-toolchain.toml`).
+- `make` (optional — every target maps to a plain `cargo` command).
+
+## Build, test, run
+
+```bash
+make build    # cargo build --workspace
+make test     # unit + integration + BDD
+make bdd      # just the Gherkin scenarios
+make run      # cargo run
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in real values:
+
+```bash
+cp .env.example .env
+```
+
+## Where things live
+
+This page is generated for **{name}** ({kind}). Edit the Markdown files under
+`docs/` to grow this site — docsify picks up changes on reload. Add new pages
+to `docs/_sidebar.md` so they show up in the navigation.
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+    )
+}
+
+fn docs_architecture(cfg: &ProjectConfig) -> String {
+    let mut layout = String::new();
+    match cfg.kind {
+        ProjectKind::ClientTool => layout.push_str("- `src/` — CLI entrypoint\n"),
+        ProjectKind::WebApp => layout.push_str("- `src/` — HTTP server entrypoint (axum)\n"),
+        ProjectKind::ClientServer => {
+            layout.push_str("- `server/` — HTTP server (axum)\n");
+            layout.push_str("- `client/` — desktop GUI client\n");
+        }
+    }
+    if cfg.frontend.is_some() {
+        layout.push_str("- `frontend/` — JS/TS frontend\n");
+    }
+    layout.push_str("- `docs/` — this documentation site (docsify)\n");
+    layout.push_str("- `tests/` — integration + BDD (`features/`, `bdd.rs`)\n");
+
+    format!(
+        r#"# Architecture
+
+**{name}** follows the IronRoot conventions: thin entrypoints, business logic
+in small focused helper modules under `src/`, and behaviour covered by both
+unit tests and BDD scenarios.
+
+## Layout
+
+{layout}
+## Principles
+
+1. **Keep entrypoints thin** — wire dependencies and delegate to library code.
+2. **One concern per module.** Domain logic and I/O do not mix.
+3. **Pure first, side-effects at the edges** — keep helpers testable.
+
+See [AGENTS.md](../AGENTS.md) for the full set of house rules.
+"#,
+        name = cfg.name,
+    )
+}
+
+// --- docs blobs ------------------------------------------------------------
+
+const DOCS_SIDEBAR: &str = r#"<!-- docs/_sidebar.md -->
+
+- **Overview**
+  - [Home](README.md)
+  - [Getting started](getting-started.md)
+  - [Architecture](architecture.md)
+"#;
+
+const DOCS_NAVBAR: &str = r#"<!-- docs/_navbar.md -->
+
+- [Home](/)
+- [Getting started](getting-started.md)
+- [Architecture](architecture.md)
+"#;
+
+const DOCS_SERVE_SH: &str = r#"#!/usr/bin/env bash
+# Serve this project's docsify site locally.
+#
+# Tries `docsify-cli` first (best DX: live reload, sidebar autoreload).
+# Falls back to `python3 -m http.server`, then `python -m http.server`.
+
+set -euo pipefail
+
+DOCS_DIR="$(cd "$(dirname "$0")" && pwd)"
+PORT="${PORT:-3000}"
+
+cd "$DOCS_DIR"
+
+echo "Serving $DOCS_DIR on http://localhost:$PORT"
+echo
+
+if command -v docsify >/dev/null 2>&1; then
+    echo "Using docsify-cli."
+    exec docsify serve "$DOCS_DIR" --port "$PORT"
+fi
+
+if command -v npx >/dev/null 2>&1; then
+    # Try docsify-cli via npx without forcing an install if it's not cached.
+    if npx --no-install docsify-cli --version >/dev/null 2>&1; then
+        echo "Using docsify-cli via npx."
+        exec npx --no-install docsify-cli serve "$DOCS_DIR" --port "$PORT"
+    fi
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+    echo "docsify-cli not found; falling back to python3 -m http.server."
+    echo "Tip: install live-reload with: npm i -g docsify-cli"
+    exec python3 -m http.server "$PORT" --bind 127.0.0.1
+fi
+
+if command -v python >/dev/null 2>&1; then
+    echo "docsify-cli not found; falling back to python -m http.server."
+    exec python -m http.server "$PORT" --bind 127.0.0.1
+fi
+
+echo "ERROR: no server available." >&2
+echo "Install either docsify-cli (npm i -g docsify-cli) or Python 3." >&2
+exit 1
+"#;
+
+const DOCS_SERVE_BAT: &str = r#"@echo off
+REM Serve this project's docsify site locally (Windows).
+REM Tries docsify-cli first, then npx, then Python's http.server.
+
+setlocal
+set "DOCS_DIR=%~dp0"
+if "%PORT%"=="" set "PORT=3000"
+
+cd /d "%DOCS_DIR%"
+
+echo Serving %DOCS_DIR% on http://localhost:%PORT%
+echo.
+
+where docsify >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo Using docsify-cli.
+    docsify serve "%DOCS_DIR%" --port %PORT%
+    goto :eof
+)
+
+where npx >nul 2>&1
+if %ERRORLEVEL%==0 (
+    npx --no-install docsify-cli --version >nul 2>&1
+    if %ERRORLEVEL%==0 (
+        echo Using docsify-cli via npx.
+        npx --no-install docsify-cli serve "%DOCS_DIR%" --port %PORT%
+        goto :eof
+    )
+)
+
+where python >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo docsify-cli not found; falling back to python -m http.server.
+    echo Tip: install live-reload with: npm i -g docsify-cli
+    python -m http.server %PORT% --bind 127.0.0.1
+    goto :eof
+)
+
+where py >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo docsify-cli not found; falling back to py -m http.server.
+    py -m http.server %PORT% --bind 127.0.0.1
+    goto :eof
+)
+
+echo ERROR: no server available.
+echo Install either docsify-cli (npm i -g docsify-cli) or Python 3.
+exit /b 1
+"#;
+
 // --- frontend blobs --------------------------------------------------------
 
 const REACT_README: &str = r#"# Frontend (React + Vite + TypeScript)
@@ -911,4 +1241,18 @@ fn write(dir: &Path, name: &str, contents: &str) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, contents)
+}
+
+/// Like [`write`], but marks the file executable on Unix (for shell scripts).
+fn write_exec(dir: &Path, name: &str, contents: &str) -> io::Result<()> {
+    write(dir, name, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        let mut perms = fs::metadata(&path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms)?;
+    }
+    Ok(())
 }
