@@ -13,6 +13,8 @@ pub fn generate(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(root, "README.md", &readme(cfg))?;
     write(root, "Makefile", &makefile(cfg))?;
     write(root, "AGENTS.md", &agents_md(cfg))?;
+    write(root, "CLAUDE.md", &claude_md(cfg))?;
+    write(root, "CHANGELOG.md", &changelog_md(cfg))?;
     write(root, "rust-toolchain.toml", RUST_TOOLCHAIN)?;
     write(root, ".env.example", &env_example(cfg))?;
     scaffold_docs(cfg, root)?;
@@ -111,6 +113,7 @@ fn scaffold_docs(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(&docs, "_navbar.md", DOCS_NAVBAR)?;
     write(&docs, "getting-started.md", &docs_getting_started(cfg))?;
     write(&docs, "architecture.md", &docs_architecture(cfg))?;
+    write(&docs, "roadmap.md", &docs_roadmap(cfg))?;
     write_exec(&docs, "serve-docs.sh", DOCS_SERVE_SH)?;
     write(&docs, "serve-docs.bat", DOCS_SERVE_BAT)?;
     Ok(())
@@ -611,7 +614,7 @@ frontend-build:
     };
 
     format!(
-        r#".PHONY: build test bdd run fmt lint check clean docs
+        r#".PHONY: build test bdd coverage audit run fmt lint check clean docs
 
 build:
 	cargo build --workspace
@@ -623,6 +626,16 @@ test:
 # `tests/features/` and step definitions in `tests/bdd.rs`.
 bdd:
 	cargo test --workspace --test bdd
+
+# Line coverage must stay above 80% — see AGENTS.md §4.3.
+# Requires: cargo install cargo-llvm-cov
+coverage:
+	cargo llvm-cov --all-features --workspace --fail-under-lines 80
+
+# Supply-chain audit. Requires: cargo install cargo-audit cargo-deny
+audit:
+	cargo audit
+	cargo deny check
 
 run:
 	cargo run
@@ -682,6 +695,8 @@ Bootstrapped by **ironroot**.
 make build
 make test     # unit + integration + BDD
 make bdd      # just the Gherkin scenarios
+make coverage # line coverage, gated at 80%
+make audit    # cargo audit + cargo deny check
 make run
 make docs     # serve the docsify docs on http://localhost:3000
 ```
@@ -698,9 +713,18 @@ This project ships with two test layers:
 
 Add a new scenario by dropping a `.feature` file under `tests/features/`
 and wiring matching `#[given]/#[when]/#[then]` steps into `tests/bdd.rs`.
-See [AGENTS.md](AGENTS.md) for the full convention.
 
-See [AGENTS.md](AGENTS.md) for AI-assistant guidance.
+Line coverage is gated at 80% (`make coverage`) — see [AGENTS.md](AGENTS.md) §4.
+
+## House rules
+
+[AGENTS.md](AGENTS.md) is the single source of truth for how work is done here:
+roadmap-driven planning, semantic versioning, changelog upkeep, unit **and** behaviour tests
+above 80% coverage, secure-coding requirements, and full audit coverage.
+[CLAUDE.md](CLAUDE.md) points Claude Code at the same file.
+
+Record every user-visible change in [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]`, in
+the same commit that makes the change. Plan it in [docs/roadmap.md](docs/roadmap.md) first.
 "#,
         name = cfg.name,
         kind = cfg.kind.label(),
@@ -772,13 +796,9 @@ without spinning up a server or a database, the helper is doing too much.
 
 ## Testing
 
-Two layers ship by default — use **both**:
-
-1. **Unit & integration tests** (`#[test]` in `src/` and `tests/*.rs`) for
-   fast, deterministic checks of individual helpers.
-2. **BDD scenarios** (Gherkin `.feature` files under `tests/features/` with
-   step definitions in `tests/bdd.rs`) for behaviour that crosses module
-   boundaries or that a non-developer stakeholder should be able to read.
+Two layers ship by default and **both** are mandatory — unit/integration tests
+plus BDD scenarios, with line coverage held above 80%. The policy is in §4
+below; this section is the mechanical walkthrough.
 
 ### Writing a BDD scenario
 
@@ -802,12 +822,14 @@ Two layers ship by default — use **both**:
 
 ## Workflow
 
-- `make fmt`   — format the workspace.
-- `make lint`  — run clippy with `-D warnings`.
-- `make test`  — run the full test suite (unit + integration + BDD).
-- `make bdd`   — run only the Cucumber/Gherkin scenarios.
+- `make fmt`      — format the workspace.
+- `make lint`     — run clippy with `-D warnings`.
+- `make test`     — run the full test suite (unit + integration + BDD).
+- `make bdd`      — run only the Cucumber/Gherkin scenarios.
+- `make coverage` — line coverage, gated at 80%.
+- `make audit`    — `cargo audit` + `cargo deny check`.
 - Update this file whenever a new convention is agreed.
-"#,
+{rules}"#,
         name = cfg.name,
         kind = cfg.kind.label(),
         gui_line = cfg
@@ -819,8 +841,351 @@ Two layers ship by default — use **both**:
             .map(|f| format!("- Frontend : {}\n", f.label()))
             .unwrap_or_default(),
         db = cfg.database.label(),
+        rules = AGENT_RULES,
     )
 }
+
+fn claude_md(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# CLAUDE.md — {name}
+
+**All project instructions live in [AGENTS.md](AGENTS.md). Read that file first; it is the
+single source of truth.** This file exists only so that Claude Code picks the rules up
+automatically — it deliberately duplicates nothing.
+
+> @AGENTS.md
+
+## Quick reminders (the full rules are in AGENTS.md)
+
+| Topic | Rule | Section |
+|---|---|---|
+| Roadmap | Every change maps to an item in [`docs/roadmap.md`](docs/roadmap.md); tick it in the same commit | §1 |
+| Versioning | Semantic Versioning; no silent breaking changes; tag every release | §2 |
+| Changelog | Update [`CHANGELOG.md`](CHANGELOG.md) under `## [Unreleased]` in the same commit | §3 |
+| Tests | Unit/integration **and** BDD scenarios — both, every feature | §4 |
+| Coverage | `make coverage` must pass at 80% lines, and coverage must not drop | §4.3 |
+| Secure code | Parameterized queries, output escaping, bounded input, handled errors, no secrets in the repo, no `unsafe` | §5 |
+| Audit | Every security-relevant action audited to an INSERT-only store on a separate instance; `make audit` clean | §6 |
+| Done | Work through the checklist before saying a change is finished | §7 |
+
+## Before you report a change as complete
+
+```bash
+make fmt
+make lint
+make test
+make coverage
+make audit
+```
+
+Do not report work as done until these pass and the AGENTS.md §7 checklist is satisfied.
+"#,
+        name = cfg.name,
+    )
+}
+
+fn changelog_md(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# Changelog
+
+All notable changes to `{name}` are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0/).
+
+Every user-visible change gets an entry under `## [Unreleased]` **in the same commit that
+makes the change** — see [AGENTS.md](AGENTS.md) §3.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.0] - Unreleased
+
+### Added
+
+- Project bootstrapped by `ironroot` ({kind}).
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+    )
+}
+
+/// The project-independent half of `AGENTS.md`: roadmap discipline, semver,
+/// changelog upkeep, the two test layers and the 80% coverage gate, secure
+/// coding requirements, and audit coverage. Kept as a plain `const` (rather
+/// than folded into the `format!` above) so its many `{}`-free code samples
+/// need no brace escaping.
+const AGENT_RULES: &str = r##"
+---
+
+**The numbered sections below are binding.** Section 7 is the checklist to run before
+calling any change complete.
+
+## 1. Follow the roadmap
+
+Work is roadmap-driven. Before starting anything:
+
+1. Read [`docs/roadmap.md`](docs/roadmap.md) and find the phase the task belongs to.
+2. If the task is **not** on the roadmap, add it there first (as an unchecked item under the
+   right phase) and say so in the pull request. Do not silently widen scope.
+3. Tick the roadmap checkbox in the **same** commit that lands the work — never ahead of it.
+4. Do not start a later phase while an earlier phase has open items that the task depends on.
+
+Roadmap items are the unit of planning; changelog entries are the unit of record. Every
+completed roadmap item produces at least one changelog entry.
+
+---
+
+## 2. Semantic versioning
+
+This project follows [Semantic Versioning 2.0.0](https://semver.org/) — `MAJOR.MINOR.PATCH`.
+
+| Change | Bump |
+|---|---|
+| Removing or renaming a public item; changing a signature, trait bound, or serialized format; tightening validation that rejects previously accepted input | **MAJOR** |
+| New public item, new feature flag, new optional config, new endpoint or command | **MINOR** |
+| Bug fix, performance work, docs, internal refactor with no public surface change | **PATCH** |
+| Dependency bump | **PATCH**, unless it changes this crate's own public surface or MSRV — then **MINOR** |
+
+Rules:
+
+- **Pre-1.0 (`0.y.z`) is not an excuse.** While the version is `0.y.z`, treat `y` as MAJOR and
+  `z` as MINOR/PATCH, and still document every break.
+- **No silent breaking changes.** A breaking change lands with a `## [Unreleased]` entry under
+  `### Removed` or `### Changed`, plus a migration note.
+- **Deprecate before removing.** Mark the item `#[deprecated(since = "...", note = "use ... instead")]`
+  in one release; remove it no earlier than the next MAJOR.
+- **Raising the MSRV is at least a MINOR bump** and must be stated in the changelog.
+- **Every released version is built from the version-control tree and gets a tag** (`vX.Y.Z`).
+  Never ship a build that does not correspond to a tagged commit.
+- Bump `version` in `Cargo.toml` and move the `## [Unreleased]` block to a dated
+  `## [X.Y.Z] - YYYY-MM-DD` heading in the same commit as the tag.
+
+---
+
+## 3. Keep the changelog updated
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). **Every**
+user-visible change updates it — in the same commit, not afterwards.
+
+- Add the entry under `## [Unreleased]` in the correct category: `Added`, `Changed`,
+  `Deprecated`, `Removed`, `Fixed`, `Security`. Use `Security` only for vulnerability fixes,
+  and name the advisory (`RUSTSEC-...`, `CVE-...`) when there is one.
+- Write for the person **consuming** the change, not for the reviewer: what changed and what
+  they must do about it. Not `refactor handler`, but
+  `HTTP handlers now return 422 instead of 400 for validation errors`.
+- Internal-only refactors with no observable effect may be omitted; when in doubt, include them.
+- The entry must make clear **what changed and where** (files, modules, endpoints), so a
+  reviewer can reconstruct the change from the changelog alone.
+- Never rewrite a released section. Corrections go in a new entry.
+
+---
+
+## 4. Tests: unit *and* behaviour, coverage above 80%
+
+Two layers are required. A feature is not done with only one of them.
+
+### 4.1 Unit / integration tests
+
+- `#[test]` (and `#[tokio::test]`) functions in `src/` (`mod tests`) and `tests/*.rs`.
+- Cover the happy path, every error branch, and the boundaries — empty input, maximum length,
+  zero, overflow, unauthorized caller.
+- Tests are deterministic: no wall-clock, no network, no shared global state, no ordering
+  dependence between tests. Inject a `Clock`, a repository, an HTTP client.
+- Every fixed bug gains a regression test that fails without the fix.
+
+### 4.2 Behaviour (BDD) tests
+
+- Gherkin `.feature` files under `tests/features/`, run by
+  [cucumber-rs](https://crates.io/crates/cucumber), with step definitions in `tests/bdd.rs`
+  (see the worked example earlier in this file).
+- Every user-facing feature and every security control (authentication, authorization,
+  lockout, input limits) gets at least one scenario, **including the negative case** — access
+  denied, input rejected, lockout triggered.
+- Keep steps thin: parse arguments, call one helper from `src/`, assert.
+
+### 4.3 Coverage gate: 80% minimum
+
+```bash
+cargo install cargo-llvm-cov          # once
+make coverage                         # fails under 80% line coverage
+cargo llvm-cov --all-features --workspace --html   # browse uncovered lines
+```
+
+- **Line coverage must stay above 80%.** A change that pushes it below the threshold is not
+  mergeable; add the missing tests instead of lowering the gate.
+- Coverage never goes **down** in a pull request, even while above 80%.
+- Do not chase the number with assertion-free tests. An uncovered error branch means a missing
+  test; a test that executes code without asserting on it is worse than no test.
+- Any coverage exclusion needs a comment justifying why the code is untestable.
+
+---
+
+## 5. Secure development practices
+
+These are requirements, not suggestions. Reviewers reject changes that violate them.
+
+### 5.1 Authentication and authorization
+
+- **One** authentication and authorization entry point for the whole application. Never
+  re-implement a check inline in a handler, a command, or a UI callback.
+- Authorize by **role/group**, never by hard-coded user identity, with granularity per
+  application function.
+- Require a second factor for sensitive operations: creating or changing credentials, changing
+  a password, changing configuration, exporting data, restoring a backup, changing permissions.
+- Apply progressive lockout on login — e.g. 3 failures -> 1 min, 5 -> 15 min, 7 -> 1 h — keyed
+  primarily on client IP, enforced **before** the password is checked, server-side. Return an
+  identical response for "unknown user" and "wrong password".
+
+### 5.2 Data and secrets
+
+- **No secret ever enters the repository** — not in code, not in committed config, not in
+  tests, not in fixtures, not in the git history. Secrets come from the environment or a
+  secret manager; `.env` is git-ignored and only `.env.example` (placeholders only) is
+  committed.
+- Passwords and anything else that never needs recovering are stored as a **one-way hash**
+  with a modern KDF (Argon2id / scrypt). Never encrypt a password, never compare one in SQL.
+- Data that must be reversible is decrypted **in server memory only**, for the shortest
+  possible time, and zeroized after use (`zeroize`).
+- Sensitive data travels **encrypted only**: TLS on every hop, including internal ones.
+- Production data never reaches development or staging without passing through a masking step.
+- Never log or persist a password (even a wrong one), token, key, session cookie, full
+  document number, or unfiltered request body.
+
+### 5.3 Code
+
+- **Parameterized queries only.** Never interpolate input — or any part of a URL — into SQL.
+  Where parameters cannot bind (table name, sort column, sort direction), use an allow-list
+  with a safe default. Manual escaping is not an acceptable primary defence.
+- **Escape on output.** No user-controlled HTML or JavaScript reaches a rendered page. Rely on
+  the template engine's auto-escaping; sanitize with an allow-list where markup is genuinely
+  allowed. Validate server-side — client-side validation is a convenience, not a control.
+- **Bound every input**, including URLs, query strings, request bodies, and file uploads.
+  Enforce the limit server-side and reject with a handled error.
+- **Handle every error.** Log it with context and a correlation id; return a generic message
+  carrying only that id. Never render a stack trace, SQL statement, file path, hostname, or
+  component version. Never swallow an error silently — no bare `let _ =` on a `Result`, no
+  `unwrap()`/`expect()`/`panic!` in request or command paths. Debug mode stays off outside
+  local development.
+- **No mutable global state fed by user input.** Configuration is loaded from a trusted source
+  and treated as immutable at runtime. Inject dependencies instead of reaching for singletons.
+- **Protect every service endpoint** with TLS plus an access key or token — read-only
+  endpoints included — and restrict by source IP where the caller is predictable. Expose the
+  minimum data needed.
+- **Never build a diagnostic shortcut**: no arbitrary-SQL endpoint, no admin screen that runs
+  free-form queries, no support backdoor, no flag that skips authentication outside
+  production. Whoever adds one owns every misuse of it.
+- Avoid heavy database work on unauthenticated surfaces; cache instead.
+
+### 5.4 Dependencies
+
+- Discontinued or unmaintained components are not allowed. Check the support horizon **before**
+  adopting a dependency.
+- Patch-level updates at least quarterly; key frameworks reviewed at least every six months.
+- A **critical** vulnerability in a dependency outranks every feature request. Fix it first,
+  and say so instead of continuing with the feature work.
+
+---
+
+## 6. Full audit coverage
+
+"Audit" means two separate obligations. Both are mandatory.
+
+### 6.1 Audit trail — who did what
+
+An audit trail is not a log. Keep the two mechanisms separate.
+
+| | Audit trail | Log |
+|---|---|---|
+| Purpose | Accountability | Diagnostics |
+| Store | Separate instance from production data | Application log sink |
+| Mutability | INSERT-only, enforced by the database | Rotated freely |
+
+Requirements:
+
+- Audit **every** security-relevant event. At minimum: sign-in (success **and** failure),
+  sign-out, account creation, account change, credential creation or change, password change,
+  permission change, configuration change, data export, backup restore, and every
+  administrative action.
+- Write the trail to a **different database instance** from production data.
+- The application's database role holds `INSERT` **only** — no `UPDATE`, no `DELETE`. The
+  immutability is enforced by database grants and constraints, never by application discipline.
+- Optimize the table for cheap inserts: minimal indexes, no heavy triggers on the write path.
+- Record at least: timestamp, actor, event, target, source IP, and a structured detail field.
+  Never put a secret or sensitive value in the detail field.
+- Asynchronous writes are fine; **silent loss is not**. A failure to audit raises an alert.
+- Document the audit mechanism — events covered, schema, retention — under `docs/`.
+
+### 6.2 Logging
+
+- **One** logging library, used everywhere. No `println!`/`eprintln!` outside `main` startup.
+- At least three levels: **Info** (routine), **Warn** (needs attention), **Error** (problems).
+- Every error is logged. Authentication events and changes to important data are always logged.
+- Configure the formatter once, centrally — do not assemble log strings at each call site. The
+  house format is `[dd/mm/yyyy] hh:mm:ss ; event ; details`, for example:
+
+  ```
+  [29/07/2026] 14:32:05 ; login.failed ; user=jsilva ip=10.2.3.4 attempt=3 lockout=60s
+  ```
+
+  Structured (JSON) logging is acceptable provided it keeps the same three fields as keys.
+
+### 6.3 Supply-chain and code audit
+
+Run in CI on every pull request, and locally before a release:
+
+```bash
+make audit    # cargo audit + cargo deny check
+make lint     # cargo clippy --all-targets -- -D warnings
+```
+
+- An advisory may only be added to a `deny.toml` ignore list with a written justification
+  naming the upstream blocker and why the code path is unreachable. "Noisy" is not a
+  justification.
+- A **critical or high** finding blocks the release and blocks new feature work until fixed.
+- Never commit `Cargo.lock` changes you have not reviewed.
+
+---
+
+## 7. Definition of done
+
+A change is complete only when **all** of these hold:
+
+- [ ] It maps to a roadmap item in [`docs/roadmap.md`](docs/roadmap.md), ticked in the same commit.
+- [ ] [`CHANGELOG.md`](CHANGELOG.md) has an entry under `## [Unreleased]` in the right category.
+- [ ] The version bump matches the semver rules in section 2 (or the change is unreleased).
+- [ ] Unit/integration tests cover the happy path, the error branches, and the boundaries.
+- [ ] At least one BDD scenario covers the behaviour, including its negative case.
+- [ ] `make coverage` passes at 80% lines and coverage did not drop.
+- [ ] `make fmt`, `make lint`, and `make test` pass.
+- [ ] `make audit` is clean.
+- [ ] Every security-relevant action the change introduces is audited (6.1) and logged (6.2).
+- [ ] No secret, credential, or production data was added to the repository.
+- [ ] Every new public item has a `///` doc comment; every new module has a `//!` comment.
+
+---
+
+## 8. Where the rules come from
+
+- [`docs/roadmap.md`](docs/roadmap.md) — what to build, and in what order.
+- [`docs/architecture.md`](docs/architecture.md) — how this project is laid out.
+- [IronRoot AGENTS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/AGENTS.md) — framework-wide agent rules.
+- [IronRoot INSTRUCTIONS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/INSTRUCTIONS.md) — naming, layout, and extension conventions.
+
+If a rule here conflicts with your organisation's own security standard, the organisation's
+standard wins — and the conflict belongs in a pull request against this file.
+"##;
 
 // --- docs renderers --------------------------------------------------------
 
@@ -898,6 +1263,7 @@ Welcome to the **{name}** documentation. The content is plain Markdown under
 
 - [Getting started](getting-started.md) — build, test, and run
 - [Architecture](architecture.md) — how this project is laid out
+- [Roadmap](roadmap.md) — what is planned, and what is done
 
 ## Reading the docs locally
 
@@ -1009,6 +1375,51 @@ See [AGENTS.md](../AGENTS.md) for the full set of house rules.
     )
 }
 
+/// Seed roadmap. `AGENTS.md` makes this file the planning unit — every change
+/// has to map to an item here — so the generated project ships with one
+/// instead of asking the first contributor to invent the convention.
+fn docs_roadmap(cfg: &ProjectConfig) -> String {
+    format!(
+        r#"# Roadmap
+
+Planning for **{name}** ({kind}). Every change maps to an item on this page — see
+[AGENTS.md](../AGENTS.md) §1. Add the item *before* the work, tick it in the same commit that
+lands the work, and record the result in [CHANGELOG.md](../CHANGELOG.md).
+
+## Phase 1 — Foundations
+
+- [x] Project bootstrapped by `ironroot`
+- [ ] Replace the placeholder entrypoint with the real one
+- [ ] First business-logic helper module under `src/`, with unit tests
+- [ ] First BDD scenario covering it (`tests/features/`)
+- [ ] `make coverage` green at 80% lines
+- [ ] `make audit` wired into CI
+
+## Phase 2 — Security baseline
+
+- [ ] Single authentication / authorization entry point
+- [ ] Role-based authorization with per-function granularity
+- [ ] Progressive login lockout (3 -> 1 min, 5 -> 15 min, 7 -> 1 h), keyed on IP
+- [ ] Second factor on sensitive operations
+- [ ] Central logging library configured with the house format
+- [ ] Audit trail on a separate, INSERT-only instance
+- [ ] Audit mechanism documented under `docs/`
+
+## Phase 3 — Features
+
+- [ ] _Add your feature items here._
+
+## Phase 4 — Release
+
+- [ ] Version set per Semantic Versioning, `CHANGELOG.md` section dated
+- [ ] Tag `vX.Y.Z` cut from the version-control tree
+- [ ] Clean `make lint`, `make test`, `make coverage`, `make audit`
+"#,
+        name = cfg.name,
+        kind = cfg.kind.label(),
+    )
+}
+
 // --- docs blobs ------------------------------------------------------------
 
 const DOCS_SIDEBAR: &str = r#"<!-- docs/_sidebar.md -->
@@ -1017,6 +1428,7 @@ const DOCS_SIDEBAR: &str = r#"<!-- docs/_sidebar.md -->
   - [Home](README.md)
   - [Getting started](getting-started.md)
   - [Architecture](architecture.md)
+  - [Roadmap](roadmap.md)
 "#;
 
 const DOCS_NAVBAR: &str = r#"<!-- docs/_navbar.md -->
@@ -1024,6 +1436,7 @@ const DOCS_NAVBAR: &str = r#"<!-- docs/_navbar.md -->
 - [Home](/)
 - [Getting started](getting-started.md)
 - [Architecture](architecture.md)
+- [Roadmap](roadmap.md)
 "#;
 
 const DOCS_SERVE_SH: &str = r#"#!/usr/bin/env bash

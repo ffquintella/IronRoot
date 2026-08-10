@@ -34,4 +34,15 @@ a real `CliApp` that registers typed commands.
 2. Create a `CliApp`, register `Command` implementations, and call `.run()`.
 3. Define your domain types implementing `Entity` from `ironroot-core`.
 
+## Contributing rules
+
+Before changing anything in this template — or in a project started from it — read
+[AGENTS.md](AGENTS.md). It is the single source of truth for how work is done here:
+roadmap-driven planning, semantic versioning, changelog upkeep, unit **and** behaviour tests
+with line coverage above 80%, secure-coding requirements, and full audit coverage.
+[CLAUDE.md](CLAUDE.md) points Claude Code at the same file.
+
+Record every user-visible change in [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]`, in
+the same commit that makes the change.
+
 See [docs/roadmap.md](../../docs/roadmap.md) for the framework roadmap.
