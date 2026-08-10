@@ -24,7 +24,7 @@ new:
 
 # Serve the docsify documentation site at http://localhost:3000.
 docs:
-	./docs/serve_docs.sh
+	./docs/serve-docs.sh
 
 # Install the ironroot bootstrapper into ~/.cargo/bin.
 install:

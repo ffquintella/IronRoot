@@ -199,8 +199,8 @@ Markdown rendered live in the browser, no build step. Serve it locally:
 ```bash
 make docs              # → http://localhost:3000
 # or directly:
-./docs/serve_docs.sh   # Unix
-docs\serve_docs.bat    # Windows
+./docs/serve-docs.sh   # Unix
+docs\serve-docs.bat    # Windows
 ```
 
 Both scripts prefer `docsify-cli` (`npm i -g docsify-cli`) and fall back to
