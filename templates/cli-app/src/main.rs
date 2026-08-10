@@ -1,38 +1,12 @@
-//! # IronRoot CLI Application Template
+//! Binary entry point for the IronRoot CLI application template.
 //!
-//! This template demonstrates how to build a structured CLI tool using the
-//! IronRoot framework. It connects to [`ironroot_cli`] for command registration
-//! and dispatch, and [`ironroot_core`] for domain modelling.
-//!
-//! ## Running
-//!
-//! ```bash
-//! cargo run -- --help
-//! cargo run -- greet Alice
-//! ```
-//!
-//! ## TODO
-//!
-//! - Add `ironroot-cli` dependency once it is published.
-//! - Register at least one real `Command` implementation.
-//! - Wire argument parsing (clap or argh) through the `ironroot-cli` adapter.
+//! Deliberately trivial: it collects the arguments and hands them to
+//! [`ironroot_cli_app::render`], which is where everything worth testing lives.
+//! See `src/lib.rs` for the rationale and for the TODO list that turns this
+//! template into a real command-line tool.
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = std::env::args().skip(1).collect();
 
-    println!("IronRoot CLI Application");
-    println!("------------------------");
-
-    if args.len() > 1 {
-        println!("Arguments received: {:?}", &args[1..]);
-        println!();
-        println!("TODO: Dispatch to the matching Command via ironroot-cli");
-    } else {
-        println!("Usage: ironroot-cli-app <command> [args...]");
-        println!();
-        println!("Available commands (placeholder):");
-        println!("  greet <name>   Print a greeting");
-        println!();
-        println!("See templates/cli-app/README.md for the full guide.");
-    }
+    println!("{}", ironroot_cli_app::render(&args));
 }

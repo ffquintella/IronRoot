@@ -12,7 +12,30 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 
 ### Added
 
+- The template now passes its own coverage gate as shipped. A new library target, `src/lib.rs`,
+  exposes `banner() -> String` and `render(&[String]) -> String` (the text the binary prints for
+  a given argument list) and unit-tests both branches in `mod tests`;
+  `tests/features/dispatch.feature` and `tests/bdd.rs` add the cucumber layer that
+  [AGENTS.md](AGENTS.md) §4.2 requires, including the negative case — no arguments prints usage
+  and never echoes an argument list. `cargo llvm-cov --all-features --workspace
+  --fail-under-lines 80` reports 94.52% line coverage instead of exiting 1 on 0.00%, so a fresh
+  copy of the template satisfies the §7 checklist before you write a line of your own code.
+- First dependencies, both dev-only: `cucumber` 0.23 and `futures` 0.3, the latter purely to
+  supply the executor that drives cucumber's async runner from `fn main` in `tests/bdd.rs`.
+  `Cargo.toml` gained a `[[test]] name = "bdd"` target with `harness = false` because cucumber
+  brings its own runner. `Cargo.lock` is now meaningful and committed: 106 crates, clean under
+  `cargo audit`.
+
 ### Changed
+
+- `src/main.rs` now only collects `std::env::args().skip(1)` and passes the result to
+  `ironroot_cli_app::render`. Both printed outputs — usage and the argument echo — are
+  byte-for-byte what they were; the text and the branch between them moved to the library target
+  so both test layers can reach them. `render` takes the arguments as a parameter rather than
+  reading `std::env::args` itself, because a helper that reaches for process state cannot be
+  driven from a scenario. Add new logic to `src/lib.rs`, not to `main` — code that only runs
+  from `main` cannot be called from a unit test or a scenario, and counts against the 80% gate
+  with no way to cover it.
 
 ### Deprecated
 
