@@ -156,7 +156,7 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
     }
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
-            "sqlx = {{ version = \"0.8\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+            "sqlx = {{ version = \"0.9\", features = [\"runtime-tokio\", \"tls-rustls\", \"{feat}\"] }}\n"
         ));
     }
     let bin_section = if kind == "bin" {
@@ -207,7 +207,7 @@ fn server_cargo_toml(cfg: &ProjectConfig) -> String {
     deps.push_str(LOGGING_DEPS);
     if let Some(feat) = cfg.database.sqlx_feature() {
         deps.push_str(&format!(
-            "sqlx = {{ version = \"0.8\", features = [\"runtime-tokio-rustls\", \"{feat}\"] }}\n"
+            "sqlx = {{ version = \"0.9\", features = [\"runtime-tokio\", \"tls-rustls\", \"{feat}\"] }}\n"
         ));
     }
     format!(
@@ -237,7 +237,7 @@ fn client_cargo_toml(cfg: &ProjectConfig) -> String {
     deps.push_str(BASE_DEPS);
     match gui {
         Gui::Egui => {
-            deps.push_str("eframe = \"0.34\"\negui = \"0.34\"\n");
+            deps.push_str("eframe = \"0.36\"\negui = \"0.36\"\n");
         }
         Gui::Tauri => {
             deps.push_str("tauri = { version = \"2\", features = [] }\n");
@@ -428,7 +428,7 @@ const CLI_DEPS: &str = "clap = { version = \"4\", features = [\"derive\"] }\n";
 const WEB_DEPS: &str = "axum = \"0.8\"\n\
                         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\", \"signal\"] }\n\
                         tower = \"0.5\"\n\
-                        tower-http = { version = \"0.6\", features = [\"trace\", \"cors\"] }\n";
+                        tower-http = { version = \"0.7\", features = [\"trace\", \"cors\"] }\n";
 
 /// Behaviour-Driven Development dev-dependencies. `cucumber` runs Gherkin
 /// `.feature` files; `tokio` is required because step functions are async.

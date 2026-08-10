@@ -26,15 +26,18 @@
 //! be stored in a plain `TEXT` column.
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng as AeadRng},
+    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use ml_kem::{
-    array::Array,
-    kem::{Decapsulate, Encapsulate},
-    EncodedSizeUser, KemCore, MlKem768,
-};
-use rand::RngCore;
+// ml-kem 0.3 deprecated the *expanded* decapsulation-key encoding in favour of
+// 64-byte seeds. We deliberately keep using the expanded form here: it is the
+// format `keypair_bytes` has always emitted, and `DecapsulationKey::to_seed`
+// returns `None` for keys loaded from an expanded encoding — so switching would
+// strand every already-persisted keypair. See the note on `keypair_bytes`.
+#[allow(deprecated)]
+use ml_kem::ExpandedKeyEncoding;
+use ml_kem::{array::Array, Decapsulate, Encapsulate, Kem, KeyExport, MlKem768};
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 use crate::AuthError;
@@ -93,8 +96,8 @@ impl SealedHash {
 
 /// Server-side sealer/unsealer using ML-KEM-768 + ChaCha20-Poly1305.
 pub struct PqSealer {
-    dk: <MlKem768 as KemCore>::DecapsulationKey,
-    ek: <MlKem768 as KemCore>::EncapsulationKey,
+    dk: <MlKem768 as Kem>::DecapsulationKey,
+    ek: <MlKem768 as Kem>::EncapsulationKey,
 }
 
 impl PqSealer {
@@ -103,8 +106,8 @@ impl PqSealer {
     /// Persist the keypair via [`PqSealer::keypair_bytes`] if you need it to
     /// survive a restart; reload with [`PqSealer::from_keypair_bytes`].
     pub fn generate() -> Self {
-        let mut rng = rand::thread_rng();
-        let (dk, ek) = <MlKem768 as KemCore>::generate(&mut rng);
+        let mut rng = rand::rng();
+        let (dk, ek) = MlKem768::generate_keypair_from_rng(&mut rng);
         Self { dk, ek }
     }
 
@@ -112,7 +115,9 @@ impl PqSealer {
     /// persistence. The decapsulation key is sensitive — store it like any
     /// other server secret.
     pub fn keypair_bytes(&self) -> (Vec<u8>, Vec<u8>) {
-        (self.dk.as_bytes().to_vec(), self.ek.as_bytes().to_vec())
+        #[allow(deprecated)]
+        let dk_bytes = self.dk.to_expanded_bytes().to_vec();
+        (dk_bytes, self.ek.to_bytes().to_vec())
     }
 
     /// Reconstruct a sealer from previously-serialised bytes.
@@ -121,25 +126,25 @@ impl PqSealer {
             .map_err(|_| AuthError::PqSeal("invalid decapsulation key length".into()))?;
         let ek_arr = Array::try_from(ek_bytes)
             .map_err(|_| AuthError::PqSeal("invalid encapsulation key length".into()))?;
-        let dk = <MlKem768 as KemCore>::DecapsulationKey::from_bytes(&dk_arr);
-        let ek = <MlKem768 as KemCore>::EncapsulationKey::from_bytes(&ek_arr);
+        #[allow(deprecated)]
+        let dk = <MlKem768 as Kem>::DecapsulationKey::from_expanded_bytes(&dk_arr)
+            .map_err(|_| AuthError::PqSeal("invalid decapsulation key".into()))?;
+        let ek = <MlKem768 as Kem>::EncapsulationKey::new(&ek_arr)
+            .map_err(|_| AuthError::PqSeal("invalid encapsulation key".into()))?;
         Ok(Self { dk, ek })
     }
 
     /// Seal a plain-text payload (typically an Argon2id PHC string).
     pub fn seal(&self, plaintext: &[u8]) -> Result<SealedHash, AuthError> {
-        let mut rng = rand::thread_rng();
-        let (ct, shared) = self
-            .ek
-            .encapsulate(&mut rng)
-            .map_err(|e| AuthError::PqSeal(format!("encapsulate: {e:?}")))?;
+        let mut rng = rand::rng();
+        let (ct, shared) = self.ek.encapsulate_with_rng(&mut rng);
 
         let key = derive_key(shared.as_slice());
-        let aead = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let aead = ChaCha20Poly1305::new(&Key::from(key));
         let mut nonce = [0u8; 12];
-        AeadRng.fill_bytes(&mut nonce);
+        rng.fill_bytes(&mut nonce);
         let ciphertext = aead
-            .encrypt(Nonce::from_slice(&nonce), plaintext)
+            .encrypt(&Nonce::from(nonce), plaintext)
             .map_err(|e| AuthError::PqSeal(format!("aead encrypt: {e}")))?;
         Ok(SealedHash {
             ct: ct.as_slice().to_vec(),
@@ -152,14 +157,11 @@ impl PqSealer {
     pub fn unseal(&self, sealed: &SealedHash) -> Result<Vec<u8>, AuthError> {
         let ct_arr = Array::try_from(sealed.ct.as_slice())
             .map_err(|_| AuthError::PqSeal("invalid ciphertext length".into()))?;
-        let shared = self
-            .dk
-            .decapsulate(&ct_arr)
-            .map_err(|e| AuthError::PqSeal(format!("decapsulate: {e:?}")))?;
+        let shared = self.dk.decapsulate(&ct_arr);
 
         let key = derive_key(shared.as_slice());
-        let aead = ChaCha20Poly1305::new(Key::from_slice(&key));
-        aead.decrypt(Nonce::from_slice(&sealed.nonce), sealed.ciphertext.as_ref())
+        let aead = ChaCha20Poly1305::new(&Key::from(key));
+        aead.decrypt(&Nonce::from(sealed.nonce), sealed.ciphertext.as_ref())
             .map_err(|e| AuthError::PqSeal(format!("aead decrypt: {e}")))
     }
 }
@@ -176,8 +178,7 @@ fn derive_key(shared: &[u8]) -> [u8; 32] {
 
 // --- minimal URL-safe base64 (no padding) ---------------------------------
 
-const ALPH: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const ALPH: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn b64_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity((bytes.len() * 4 + 2) / 3);

@@ -19,13 +19,16 @@ postgres = ["dep:sqlx-postgres"]
 # Cargo's resolver still picks a version for it (along with its conflicting
 # `libsqlite3-sys` requirement) — which collides with the `libsqlite3-sys`
 # pulled by `hiqlite`/`rusqlite` in this workspace.
-sqlx-core = { version = "0.7.4", default-features = false, features = ["_rt-tokio", "_tls-rustls"] }
-sqlx-mysql = { version = "0.7.4", default-features = false, optional = true }
-sqlx-postgres = { version = "0.7.4", default-features = false, optional = true }
-rusqlite = { version = "0.39", default-features = false, features = ["bundled"], optional = true }
+# sqlx 0.9 split the old `_tls-rustls` feature into provider-specific variants;
+# `_tls-rustls-ring-webpki` (ring backend + bundled webpki roots) is the direct
+# equivalent of what `_tls-rustls` selected under 0.7.
+sqlx-core = { version = "0.9", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki"] }
+sqlx-mysql = { version = "0.9", default-features = false, optional = true }
+sqlx-postgres = { version = "0.9", default-features = false, optional = true }
+rusqlite = { version = "0.40", default-features = false, features = ["bundled"], optional = true }
 tokio = { version = "1", features = ["rt", "sync"], optional = true }
 async-trait = "0.1"
-thiserror = "1"
+thiserror = "2"
 tracing = "0.1"
 
 [dev-dependencies]

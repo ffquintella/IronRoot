@@ -14,9 +14,9 @@ syslog = ["dep:syslog"]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
-file-rotate = "0.7"
-thiserror = "1"
-syslog = { version = "6", optional = true }
+file-rotate = "0.8"
+thiserror = "2"
+syslog = { version = "7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

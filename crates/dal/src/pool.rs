@@ -1,6 +1,8 @@
 //! Backend-routed connection pool.
 
 use async_trait::async_trait;
+#[cfg(any(feature = "mysql", feature = "postgres"))]
+use sqlx_core::sql_str::AssertSqlSafe;
 
 use crate::{row::Row, DalError, DalPool, ExecResult};
 
@@ -191,7 +193,9 @@ impl Pool {
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
-                let r = sqlx_core::query::query(sql).execute(p).await?;
+                let r = sqlx_core::query::query(AssertSqlSafe(sql))
+                    .execute(p)
+                    .await?;
                 Ok(ExecResult {
                     rows_affected: r.rows_affected(),
                     last_insert_id: Some(r.last_insert_id() as i64),
@@ -199,7 +203,9 @@ impl Pool {
             }
             #[cfg(feature = "postgres")]
             Pool::Postgres(p) => {
-                let r = sqlx_core::query::query(sql).execute(p).await?;
+                let r = sqlx_core::query::query(AssertSqlSafe(sql))
+                    .execute(p)
+                    .await?;
                 Ok(ExecResult {
                     rows_affected: r.rows_affected(),
                     last_insert_id: None,
@@ -231,12 +237,16 @@ impl Pool {
             }
             #[cfg(feature = "mysql")]
             Pool::MySql(p) => {
-                let rows = sqlx_core::query::query(sql).fetch_all(p).await?;
+                let rows = sqlx_core::query::query(AssertSqlSafe(sql))
+                    .fetch_all(p)
+                    .await?;
                 Ok(rows.into_iter().map(Row::from_mysql).collect())
             }
             #[cfg(feature = "postgres")]
             Pool::Postgres(p) => {
-                let rows = sqlx_core::query::query(sql).fetch_all(p).await?;
+                let rows = sqlx_core::query::query(AssertSqlSafe(sql))
+                    .fetch_all(p)
+                    .await?;
                 Ok(rows.into_iter().map(Row::from_pg).collect())
             }
         }
@@ -254,7 +264,9 @@ impl Pool {
                     let mut stmt = conn.prepare(&sql).map_err(map_rusqlite)?;
                     let mut rows = stmt.query([]).map_err(map_rusqlite)?;
                     let opt = match rows.next().map_err(map_rusqlite)? {
-                        Some(row) => Some(crate::row::SqliteRow::from_row(row).map_err(map_rusqlite)?),
+                        Some(row) => {
+                            Some(crate::row::SqliteRow::from_row(row).map_err(map_rusqlite)?)
+                        }
                         None => None,
                     };
                     Ok::<_, DalError>(opt.map(Row::from_sqlite))
@@ -263,9 +275,15 @@ impl Pool {
                 .map_err(|e| DalError::Database(e.to_string()))?
             }
             #[cfg(feature = "mysql")]
-            Pool::MySql(p) => Ok(sqlx_core::query::query(sql).fetch_optional(p).await?.map(Row::from_mysql)),
+            Pool::MySql(p) => Ok(sqlx_core::query::query(AssertSqlSafe(sql))
+                .fetch_optional(p)
+                .await?
+                .map(Row::from_mysql)),
             #[cfg(feature = "postgres")]
-            Pool::Postgres(p) => Ok(sqlx_core::query::query(sql).fetch_optional(p).await?.map(Row::from_pg)),
+            Pool::Postgres(p) => Ok(sqlx_core::query::query(AssertSqlSafe(sql))
+                .fetch_optional(p)
+                .await?
+                .map(Row::from_pg)),
         }
     }
 }
@@ -295,7 +313,10 @@ mod tests {
 
     #[test]
     fn parses_backend_from_url_scheme() {
-        assert_eq!(Backend::from_url("sqlite::memory:").unwrap(), Backend::Sqlite);
+        assert_eq!(
+            Backend::from_url("sqlite::memory:").unwrap(),
+            Backend::Sqlite
+        );
         assert_eq!(
             Backend::from_url("sqlite:///tmp/test.db").unwrap(),
             Backend::Sqlite
@@ -336,7 +357,10 @@ mod tests {
             .unwrap();
         assert_eq!(r.rows_affected, 2);
 
-        let rows = pool.fetch_all("SELECT id, name FROM t ORDER BY id").await.unwrap();
+        let rows = pool
+            .fetch_all("SELECT id, name FROM t ORDER BY id")
+            .await
+            .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].try_get_string("name").unwrap(), "Ada");
         assert_eq!(rows[1].try_get_string("name").unwrap(), "Bob");

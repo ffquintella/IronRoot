@@ -15,17 +15,21 @@ pq-seal = ["dep:ml-kem", "dep:chacha20poly1305", "dep:sha2"]
 [dependencies]
 argon2 = "0.5"
 password-hash = { version = "0.5", features = ["std"] }
+# Pinned to 0.6 by `argon2 0.5` / `password-hash 0.5` (the latest stable
+# release of that stack) — used for Argon2id salt generation in `password.rs`.
 rand_core = { version = "0.6", features = ["std"] }
-rand = "0.8"
-thiserror = "1"
+# The newer RustCrypto generation (ml-kem/sha2/chacha20poly1305) is on
+# rand_core 0.10; `rand 0.10` matches it and is used only by `pq.rs`.
+rand = "0.10"
+thiserror = "2"
 async-trait = "0.1"
 tracing = "0.1"
 
 # Optional, behind feature flags.
 ironroot-dal = { path = "../dal", optional = true }
-ml-kem = { version = "0.2", optional = true }
-chacha20poly1305 = { version = "0.10", optional = true }
-sha2 = { version = "0.10", optional = true }
+ml-kem = { version = "0.3", optional = true }
+chacha20poly1305 = { version = "0.11", optional = true }
+sha2 = { version = "0.11", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
