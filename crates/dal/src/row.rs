@@ -97,9 +97,13 @@ impl Row {
                 }),
             },
             #[cfg(feature = "mysql")]
-            Row::MySql(r) => r.try_get::<i64, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::MySql(r) => r
+                .try_get::<i64, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
             #[cfg(feature = "postgres")]
-            Row::Postgres(r) => r.try_get::<i64, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::Postgres(r) => r
+                .try_get::<i64, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
         }
     }
 
@@ -117,9 +121,13 @@ impl Row {
                 }),
             },
             #[cfg(feature = "mysql")]
-            Row::MySql(r) => r.try_get::<String, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::MySql(r) => r
+                .try_get::<String, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
             #[cfg(feature = "postgres")]
-            Row::Postgres(r) => r.try_get::<String, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::Postgres(r) => r
+                .try_get::<String, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
         }
     }
 
@@ -137,9 +145,13 @@ impl Row {
                 }),
             },
             #[cfg(feature = "mysql")]
-            Row::MySql(r) => r.try_get::<bool, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::MySql(r) => r
+                .try_get::<bool, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
             #[cfg(feature = "postgres")]
-            Row::Postgres(r) => r.try_get::<bool, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::Postgres(r) => r
+                .try_get::<bool, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
         }
     }
 
@@ -158,9 +170,13 @@ impl Row {
                 }),
             },
             #[cfg(feature = "mysql")]
-            Row::MySql(r) => r.try_get::<f64, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::MySql(r) => r
+                .try_get::<f64, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
             #[cfg(feature = "postgres")]
-            Row::Postgres(r) => r.try_get::<f64, _>(column).map_err(|e| decode_sqlx(column, e)),
+            Row::Postgres(r) => r
+                .try_get::<f64, _>(column)
+                .map_err(|e| decode_sqlx(column, e)),
         }
     }
 }

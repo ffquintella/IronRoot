@@ -2,6 +2,7 @@
 name = "ironroot-dal-hiqlite"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.95"
 license = "MIT"
 description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-dal"
 
@@ -16,5 +17,8 @@ description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-da
 
 [dependencies]
 hiqlite = { version = "0.14", default-features = false, features = ["sqlite"] }
-thiserror = "2"
-tracing = "0.1"
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

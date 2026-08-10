@@ -2,6 +2,7 @@
 name = "ironroot-macros"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Procedural macros for the IronRoot framework"
 
@@ -9,6 +10,9 @@ description = "Procedural macros for the IronRoot framework"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = { workspace = true }
-quote = { workspace = true }
-syn = { workspace = true }
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+
+[lints]
+workspace = true

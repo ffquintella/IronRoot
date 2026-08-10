@@ -4,9 +4,9 @@
 use crate::{AuthError, Credentials, NewUser, PasswordHasher, User, UserRepository};
 
 #[cfg(feature = "pq-seal")]
-use std::sync::Arc;
+use crate::{PqSealer, pq::SealedHash};
 #[cfg(feature = "pq-seal")]
-use crate::{pq::SealedHash, PqSealer};
+use std::sync::Arc;
 
 /// Orchestrates user registration and credential verification.
 ///

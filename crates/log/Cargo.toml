@@ -2,6 +2,7 @@
 name = "ironroot-log"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Default logging facade for IronRoot — file rotation (10MB) and optional syslog export"
 
@@ -11,12 +12,15 @@ default = []
 syslog = ["dep:syslog"]
 
 [dependencies]
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 file-rotate = "0.8"
-thiserror = "2"
+thiserror.workspace = true
 syslog = { version = "7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

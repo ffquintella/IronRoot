@@ -26,8 +26,8 @@
 //! be stored in a plain `TEXT` column.
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit},
 };
 // ml-kem 0.3 deprecated the *expanded* decapsulation-key encoding in favour of
 // 64-byte seeds. We deliberately keep using the expanded form here: it is the
@@ -36,7 +36,7 @@ use chacha20poly1305::{
 // strand every already-persisted keypair. See the note on `keypair_bytes`.
 #[allow(deprecated)]
 use ml_kem::ExpandedKeyEncoding;
-use ml_kem::{array::Array, Decapsulate, Encapsulate, Kem, KeyExport, MlKem768};
+use ml_kem::{Decapsulate, Encapsulate, Kem, KeyExport, MlKem768, array::Array};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
@@ -181,7 +181,7 @@ fn derive_key(shared: &[u8]) -> [u8; 32] {
 const ALPH: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn b64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity((bytes.len() * 4 + 2) / 3);
+    let mut out = String::with_capacity((bytes.len() * 4).div_ceil(3));
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0];
         let b1 = chunk.get(1).copied().unwrap_or(0);

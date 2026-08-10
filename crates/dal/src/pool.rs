@@ -4,7 +4,7 @@ use async_trait::async_trait;
 #[cfg(any(feature = "mysql", feature = "postgres"))]
 use sqlx_core::sql_str::AssertSqlSafe;
 
-use crate::{row::Row, DalError, DalPool, ExecResult};
+use crate::{DalError, DalPool, ExecResult, row::Row};
 
 #[cfg(feature = "sqlite")]
 use std::sync::{Arc, Mutex};

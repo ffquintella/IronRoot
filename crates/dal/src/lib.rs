@@ -42,6 +42,17 @@
 //! it on your domain types to get a uniform CRUD-style interface, regardless
 //! of the backend in use.
 
+// With no backend selected, `Pool` degenerates to an empty enum and every
+// `match` over it fails as non-exhaustive — a wall of E0004 that says nothing
+// about the actual mistake. Fail loudly and usefully instead.
+#[cfg(not(any(feature = "sqlite", feature = "mysql", feature = "postgres")))]
+compile_error!(
+    "ironroot-dal needs at least one backend feature enabled: \
+     `sqlite`, `mysql`, or `postgres`. The default feature set enables \
+     `sqlite` and `mysql`; if you passed `--no-default-features`, re-add the \
+     backend you want with `--features <backend>`."
+);
+
 use std::fmt;
 
 use async_trait::async_trait;

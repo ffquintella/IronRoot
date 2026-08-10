@@ -87,9 +87,7 @@ impl Database {
         match self {
             Database::None => None,
             Database::Sqlite => Some("sqlite://./data.db"),
-            Database::Postgres => {
-                Some("postgres://postgres:postgres@localhost:5432/app")
-            }
+            Database::Postgres => Some("postgres://postgres:postgres@localhost:5432/app"),
             Database::MySql => Some("mysql://root:root@localhost:3306/app"),
         }
     }

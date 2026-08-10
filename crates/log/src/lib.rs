@@ -56,14 +56,14 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
+use file_rotate::{ContentLimit, FileRotate, compression::Compression, suffix::AppendCount};
 use thiserror::Error;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{self, MakeWriter},
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter,
 };
 
 /// Default rotation threshold: 10 MB.
@@ -250,9 +250,7 @@ impl LogConfig {
             .try_init()
             .map_err(|_| LogError::SubscriberAlreadySet)?;
 
-        Ok(LogGuard {
-            _file: file_guard,
-        })
+        Ok(LogGuard { _file: file_guard })
     }
 }
 
@@ -302,9 +300,7 @@ fn build_syslog_writer(app_name: &str, target: SyslogTarget) -> Result<SyslogWri
 #[cfg(feature = "syslog")]
 #[derive(Clone)]
 struct SyslogWriter(
-    std::sync::Arc<
-        std::sync::Mutex<syslog::Logger<syslog::LoggerBackend, syslog::Formatter3164>>,
-    >,
+    std::sync::Arc<std::sync::Mutex<syslog::Logger<syslog::LoggerBackend, syslog::Formatter3164>>>,
 );
 
 #[cfg(feature = "syslog")]

@@ -55,7 +55,10 @@ mod tests {
 
     #[test]
     fn entity_returns_correct_id() {
-        let p = Product { id: 42, name: "Widget".to_string() };
+        let p = Product {
+            id: 42,
+            name: "Widget".to_string(),
+        };
         assert_eq!(*p.id(), 42);
     }
 }
