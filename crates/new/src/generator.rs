@@ -38,26 +38,30 @@ pub fn generate(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
 // ---------------------------------------------------------------------------
 
 fn scaffold_cli(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
-    write(root, "Cargo.toml", &single_cargo_toml(cfg, "bin"))?;
+    write(root, "Cargo.toml", &single_cargo_toml(cfg))?;
     let src = root.join("src");
     fs::create_dir_all(&src)?;
-    write(&src, "main.rs", &cli_main_rs(cfg))?;
+    write(&src, "lib.rs", &cli_lib_rs(&cfg.name))?;
+    write(&src, "logging.rs", LOGGING_RS)?;
+    write(&src, "main.rs", &cli_main_rs(&cfg.name))?;
     let tests = root.join("tests");
     fs::create_dir_all(&tests)?;
-    write(&tests, "smoke.rs", CLI_SMOKE_TEST)?;
-    scaffold_bdd(&tests, ProjectKind::ClientTool)?;
+    write(&tests, "smoke.rs", &cli_smoke_test(&cfg.name))?;
+    scaffold_bdd(&tests, Layer::Cli, &cfg.name)?;
     Ok(())
 }
 
 fn scaffold_webapp(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
-    write(root, "Cargo.toml", &single_cargo_toml(cfg, "bin"))?;
+    write(root, "Cargo.toml", &single_cargo_toml(cfg))?;
     let src = root.join("src");
     fs::create_dir_all(&src)?;
-    write(&src, "main.rs", &webapp_main_rs(cfg))?;
+    write(&src, "lib.rs", &server_lib_rs(&cfg.name))?;
+    write(&src, "logging.rs", LOGGING_RS)?;
+    write(&src, "main.rs", &server_main_rs(&cfg.name))?;
     let tests = root.join("tests");
     fs::create_dir_all(&tests)?;
-    write(&tests, "smoke.rs", WEBAPP_SMOKE_TEST)?;
-    scaffold_bdd(&tests, ProjectKind::WebApp)?;
+    write(&tests, "smoke.rs", &server_smoke_test(&cfg.name))?;
+    scaffold_bdd(&tests, Layer::Server, &cfg.name)?;
     Ok(())
 }
 
@@ -66,15 +70,23 @@ fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(root, "Cargo.toml", &workspace_cargo_toml(cfg))?;
 
     // server
+    let server_pkg = format!("{}-server", cfg.name);
     let server = root.join("server");
     fs::create_dir_all(server.join("src"))?;
     fs::create_dir_all(server.join("tests"))?;
     write(&server, "Cargo.toml", &server_cargo_toml(cfg))?;
-    write(&server.join("src"), "main.rs", &webapp_main_rs(cfg))?;
-    write(&server.join("tests"), "smoke.rs", WEBAPP_SMOKE_TEST)?;
-    scaffold_bdd(&server.join("tests"), ProjectKind::WebApp)?;
+    write(&server.join("src"), "lib.rs", &server_lib_rs(&server_pkg))?;
+    write(&server.join("src"), "logging.rs", LOGGING_RS)?;
+    write(&server.join("src"), "main.rs", &server_main_rs(&server_pkg))?;
+    write(
+        &server.join("tests"),
+        "smoke.rs",
+        &server_smoke_test(&server_pkg),
+    )?;
+    scaffold_bdd(&server.join("tests"), Layer::Server, &server_pkg)?;
 
     // client
+    let client_pkg = format!("{}-client", cfg.name);
     let client = root.join("client");
     fs::create_dir_all(client.join("src"))?;
     fs::create_dir_all(client.join("tests"))?;
@@ -82,22 +94,49 @@ fn scaffold_client_server(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     let gui = cfg.gui.expect("client/server must have a gui");
     write(
         &client.join("src"),
-        "main.rs",
-        &client_main_rs(gui, &cfg.name),
+        "lib.rs",
+        &client_lib_rs(gui, &client_pkg),
     )?;
-    write(&client.join("tests"), "smoke.rs", CLIENT_SMOKE_TEST)?;
-    scaffold_bdd(&client.join("tests"), ProjectKind::ClientServer)?;
+    write(
+        &client.join("src"),
+        "main.rs",
+        &client_main_rs(gui, &client_pkg),
+    )?;
+    write(
+        &client.join("tests"),
+        "smoke.rs",
+        &client_smoke_test(&client_pkg),
+    )?;
+    scaffold_bdd(&client.join("tests"), Layer::Client, &client_pkg)?;
     Ok(())
 }
 
-/// Drop a starter Gherkin feature file and step-definitions runner into
+/// Which set of Gherkin scenarios and step definitions a crate gets. One per
+/// shape of generated crate, because a scenario that does not drive the crate's
+/// own library is a scenario that proves nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layer {
+    Cli,
+    Server,
+    Client,
+}
+
+/// Drop the starter Gherkin feature file and its step definitions into
 /// `tests/`. Cargo will pick `tests/bdd.rs` up automatically because each
 /// generated `Cargo.toml` carries a matching `[[test]] harness = false` entry.
-fn scaffold_bdd(tests_dir: &Path, _kind: ProjectKind) -> io::Result<()> {
+///
+/// The steps call straight into the crate's `src/lib.rs`; they never
+/// re-implement what they are meant to be checking.
+fn scaffold_bdd(tests_dir: &Path, layer: Layer, package: &str) -> io::Result<()> {
     let features = tests_dir.join("features");
     fs::create_dir_all(&features)?;
-    write(&features, "arithmetic.feature", BDD_FEATURE)?;
-    write(tests_dir, "bdd.rs", BDD_RUNNER)?;
+    let (feature_name, feature, runner) = match layer {
+        Layer::Cli => ("command-line.feature", CLI_FEATURE, CLI_BDD_RUNNER),
+        Layer::Server => ("endpoints.feature", SERVER_FEATURE, SERVER_BDD_RUNNER),
+        Layer::Client => ("greeting.feature", CLIENT_FEATURE, CLIENT_BDD_RUNNER),
+    };
+    write(&features, feature_name, &fill(feature, package))?;
+    write(tests_dir, "bdd.rs", &fill(runner, package))?;
     Ok(())
 }
 
@@ -169,7 +208,7 @@ fn scaffold_frontend(frontend: Frontend, root: &Path) -> io::Result<()> {
 // Cargo.toml renderers
 // ---------------------------------------------------------------------------
 
-fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
+fn single_cargo_toml(cfg: &ProjectConfig) -> String {
     let mut deps = String::new();
     deps.push_str(BASE_DEPS);
     if matches!(cfg.kind, ProjectKind::WebApp) {
@@ -184,30 +223,59 @@ fn single_cargo_toml(cfg: &ProjectConfig, kind: &str) -> String {
             "sqlx = {{ version = \"0.9\", features = [\"runtime-tokio\", \"tls-rustls\", \"{feat}\"] }}\n"
         ));
     }
-    let bin_section = if kind == "bin" {
-        format!(
-            "\n[[bin]]\nname = \"{}\"\npath = \"src/main.rs\"\n",
-            cfg.name
-        )
-    } else {
-        String::new()
-    };
     format!(
         r#"[package]
 name = "{name}"
 version = "0.1.0"
 edition = "2024"
 description = "Bootstrapped by ironroot"
-{bin_section}
+{lib_section}
+[[bin]]
+name = "{name}"
+path = "src/main.rs"
+
 [dependencies]
 {deps}
 [dev-dependencies]
 {bdd_deps}
 {bdd_harness}"#,
         name = cfg.name,
+        lib_section = lib_section(&cfg.name),
         bdd_deps = BDD_DEV_DEPS,
         bdd_harness = BDD_HARNESS,
     )
+}
+
+/// The `[lib]` target every generated crate carries.
+///
+/// It is not decoration. `src/main.rs` is compiled as a binary, and nothing in
+/// a binary can be reached from `tests/*.rs` or from a cucumber step — so any
+/// logic left there is logic the 85% coverage gate in `AGENTS.md` §4.3 counts
+/// and no test can ever cover. The library target is what makes the two
+/// mandatory test layers possible at all.
+fn lib_section(package: &str) -> String {
+    format!(
+        "\n[lib]\nname = \"{crate_ident}\"\npath = \"src/lib.rs\"\n",
+        crate_ident = crate_ident(package),
+    )
+}
+
+/// The Rust identifier cargo derives from a package name: `my-app` -> `my_app`.
+fn crate_ident(package: &str) -> String {
+    package.replace('-', "_")
+}
+
+/// Expand the `{{package}}` / `{{crate}}` markers in a generated-source
+/// template.
+///
+/// The templates are themselves Rust and Gherkin, both full of braces;
+/// `format!` would need every one of them doubled, and a template nobody can
+/// paste into a scratch file to check is a template that quietly drifts from
+/// the code it is supposed to mirror. Markers keep them readable.
+fn fill(template: &str, package: &str) -> String {
+    template
+        .replace("{{package}}", package)
+        .replace("{{crate}}", &crate_ident(package))
 }
 
 fn workspace_cargo_toml(cfg: &ProjectConfig) -> String {
@@ -240,7 +308,7 @@ fn server_cargo_toml(cfg: &ProjectConfig) -> String {
 name = "{name}-server"
 version.workspace = true
 edition.workspace = true
-
+{lib_section}
 [[bin]]
 name = "{name}-server"
 path = "src/main.rs"
@@ -251,6 +319,7 @@ path = "src/main.rs"
 {bdd_deps}
 {bdd_harness}"#,
         name = cfg.name,
+        lib_section = lib_section(&format!("{}-server", cfg.name)),
         bdd_deps = BDD_DEV_DEPS,
         bdd_harness = BDD_HARNESS,
     )
@@ -273,7 +342,7 @@ fn client_cargo_toml(cfg: &ProjectConfig) -> String {
 name = "{name}-client"
 version.workspace = true
 edition.workspace = true
-
+{lib_section}
 [[bin]]
 name = "{name}-client"
 path = "src/main.rs"
@@ -284,6 +353,7 @@ path = "src/main.rs"
 {bdd_deps}
 {bdd_harness}"#,
         name = cfg.name,
+        lib_section = lib_section(&format!("{}-client", cfg.name)),
         bdd_deps = BDD_DEV_DEPS,
         bdd_harness = BDD_HARNESS,
     )
@@ -293,142 +363,63 @@ path = "src/main.rs"
 // Source file renderers
 // ---------------------------------------------------------------------------
 
-fn cli_main_rs(cfg: &ProjectConfig) -> String {
-    format!(
-        r#"//! `{name}` — CLI bootstrapped by ironroot.
-
-{logging}
-fn main() {{
-    let _log_guard = init_logging("{name}");
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() {{
-        tracing::info!(version = env!("CARGO_PKG_VERSION"), "{name} starting");
-        println!("{name} v{{}}", env!("CARGO_PKG_VERSION"));
-        println!("usage: {name} <command> [args...]");
-        return;
-    }}
-    match args[0].as_str() {{
-        "hello" => {{
-            tracing::info!(target = args.get(1).map(String::as_str).unwrap_or("world"), "greet");
-            println!("hello, {{}}!", args.get(1).map(String::as_str).unwrap_or("world"));
-        }}
-        other => {{
-            tracing::warn!(command = other, "unknown command");
-            eprintln!("unknown command: {{other}}");
-        }}
-    }}
-}}
-
-pub fn add(a: i64, b: i64) -> i64 {{
-    a + b
-}}
-
-#[cfg(test)]
-mod tests {{
-    use super::*;
-
-    #[test]
-    fn add_works() {{
-        assert_eq!(add(2, 3), 5);
-    }}
-}}
-"#,
-        name = cfg.name,
-        logging = LOGGING_BOOT,
-    )
+fn cli_lib_rs(package: &str) -> String {
+    fill(CLI_LIB_RS, package)
 }
 
-fn webapp_main_rs(cfg: &ProjectConfig) -> String {
-    format!(
-        r#"//! HTTP server bootstrapped by ironroot.
-
-use axum::{{routing::get, Router}};
-
-{logging}
-#[tokio::main]
-async fn main() {{
-    let _log_guard = init_logging("{name}");
-
-    let app = Router::new().route("/", get(root)).route("/health", get(health));
-
-    let addr = "0.0.0.0:3000";
-    tracing::info!("listening on {{addr}}");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}}
-
-async fn root() -> &'static str {{
-    "ok"
-}}
-
-async fn health() -> &'static str {{
-    "healthy"
-}}
-
-#[cfg(test)]
-mod tests {{
-    #[tokio::test]
-    async fn health_returns_healthy() {{
-        assert_eq!(super::health().await, "healthy");
-    }}
-}}
-"#,
-        name = cfg.name,
-        logging = LOGGING_BOOT,
-    )
+fn cli_main_rs(package: &str) -> String {
+    fill(CLI_MAIN_RS, package)
 }
 
-fn client_main_rs(gui: Gui, name: &str) -> String {
-    match gui {
-        Gui::Egui => format!(
-            r#"//! `{name}` desktop client (egui).
+fn cli_smoke_test(package: &str) -> String {
+    fill(CLI_SMOKE_TEST, package)
+}
 
-use eframe::egui;
+fn server_lib_rs(package: &str) -> String {
+    fill(SERVER_LIB_RS, package)
+}
 
-fn main() -> Result<(), eframe::Error> {{
-    let options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "{name}",
-        options,
-        Box::new(|_cc| Box::<App>::default()),
-    )
-}}
+fn server_main_rs(package: &str) -> String {
+    fill(SERVER_MAIN_RS, package)
+}
 
-#[derive(Default)]
-struct App {{
-    name: String,
-}}
+fn server_smoke_test(package: &str) -> String {
+    fill(SERVER_SMOKE_TEST, package)
+}
 
-impl eframe::App for App {{
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {{
-        egui::CentralPanel::default().show(ctx, |ui| {{
-            ui.heading("Hello from {name}");
-            ui.horizontal(|ui| {{
-                ui.label("Your name:");
-                ui.text_edit_singleline(&mut self.name);
-            }});
-            if ui.button("Greet").clicked() {{
-                println!("Hello, {{}}!", self.name);
-            }}
-        }});
-    }}
-}}
-"#,
-        ),
-        Gui::Tauri => format!(
-            r#"//! `{name}` desktop client (Tauri).
-//!
-//! NOTE: a real Tauri project requires `tauri.conf.json`, icons, and a
-//! frontend build step. This file is a minimal placeholder; see
-//! https://tauri.app for the full setup guide.
+/// The client's `src/lib.rs`: one toolkit-free core shared by both GUIs, plus
+/// the shell for the chosen one. The core is where every decision lives, which
+/// is what lets the unit tests and the scenarios drive the client without
+/// opening a window.
+///
+/// The shell contributes its own tests to the same `mod tests`, so whatever a
+/// backend adds to the file it also has to cover.
+fn client_lib_rs(gui: Gui, package: &str) -> String {
+    let (shell, shell_tests) = match gui {
+        Gui::Egui => (EGUI_SHELL, EGUI_SHELL_TESTS),
+        Gui::Tauri => (TAURI_SHELL, TAURI_SHELL_TESTS),
+    };
+    let source = [
+        CLIENT_LIB_CORE,
+        shell,
+        CLIENT_LIB_TESTS,
+        shell_tests,
+        CLIENT_LIB_TESTS_END,
+    ]
+    .concat();
+    fill(&source, package)
+}
 
-fn main() {{
-    println!("This is a placeholder. Run `cargo tauri init` inside this crate");
-    println!("to generate `tauri.conf.json`, then wire it up to the frontend/ dir.");
-}}
-"#,
-        ),
-    }
+fn client_main_rs(gui: Gui, package: &str) -> String {
+    let template = match gui {
+        Gui::Egui => EGUI_MAIN_RS,
+        Gui::Tauri => TAURI_MAIN_RS,
+    };
+    fill(template, package)
+}
+
+fn client_smoke_test(package: &str) -> String {
+    fill(CLIENT_SMOKE_TEST, package)
 }
 
 // ---------------------------------------------------------------------------
@@ -449,10 +440,12 @@ const BASE_DEPS: &str = "anyhow = \"1\"\n\
 /// Extra deps for CLI-shaped projects.
 const CLI_DEPS: &str = "clap = { version = \"4\", features = [\"derive\"] }\n";
 
-/// Extra deps for HTTP-server-shaped projects.
+/// Extra deps for HTTP-server-shaped projects. `tower`'s `util` feature carries
+/// `ServiceExt::oneshot`, which is how the generated tests drive the router
+/// in-process — no socket, no port, no flake.
 const WEB_DEPS: &str = "axum = \"0.8\"\n\
                         tokio = { version = \"1\", features = [\"macros\", \"rt-multi-thread\", \"signal\"] }\n\
-                        tower = \"0.5\"\n\
+                        tower = { version = \"0.5\", features = [\"util\"] }\n\
                         tower-http = { version = \"0.7\", features = [\"trace\", \"cors\"] }\n";
 
 /// Behaviour-Driven Development dev-dependencies. `cucumber` runs Gherkin
@@ -464,69 +457,6 @@ const BDD_DEV_DEPS: &str = "cucumber = \"0.23\"\n\
 /// harness) for `tests/bdd.rs`.
 const BDD_HARNESS: &str = "\n[[test]]\nname = \"bdd\"\nharness = false\n";
 
-/// Starter Gherkin scenario. The matching step definitions live in
-/// `tests/bdd.rs`. Add more `.feature` files alongside this one — the runner
-/// picks up every file under `tests/features/`.
-const BDD_FEATURE: &str = r#"Feature: Arithmetic helpers
-  As a developer
-  I want simple arithmetic helpers
-  So that I can verify the BDD harness works end-to-end.
-
-  Scenario: Adding two positive numbers
-    Given I have the numbers 2 and 3
-    When I add them together
-    Then the result should be 5
-
-  Scenario: Adding zero is identity
-    Given I have the numbers 7 and 0
-    When I add them together
-    Then the result should be 7
-"#;
-
-/// Cucumber runner + step definitions. Lives at `tests/bdd.rs`. Extend the
-/// `World` struct and add new `#[given]/#[when]/#[then]` functions as your
-/// domain grows — keep them thin and delegate to real helpers in `src/`.
-const BDD_RUNNER: &str = r#"//! BDD test runner — executes every `.feature` file under `tests/features/`.
-//!
-//! Run with `cargo test --test bdd` or `make bdd`.
-//!
-//! Step definitions should stay thin: parse Gherkin arguments, call into the
-//! real business-logic helpers in `src/`, and assert on the result. Avoid
-//! reimplementing logic inside steps — that defeats the purpose of BDD.
-
-use cucumber::{given, then, when, World};
-
-#[derive(Debug, Default, World)]
-pub struct AppWorld {
-    a: i64,
-    b: i64,
-    result: i64,
-}
-
-#[given(regex = r"^I have the numbers (-?\d+) and (-?\d+)$")]
-async fn given_numbers(world: &mut AppWorld, a: i64, b: i64) {
-    world.a = a;
-    world.b = b;
-}
-
-#[when("I add them together")]
-async fn when_added(world: &mut AppWorld) {
-    // In a real project this should call into a helper from `src/`, e.g.
-    // `world.result = my_crate::math::add(world.a, world.b);`
-    world.result = world.a + world.b;
-}
-
-#[then(regex = r"^the result should be (-?\d+)$")]
-async fn then_result(world: &mut AppWorld, expected: i64) {
-    assert_eq!(world.result, expected);
-}
-
-#[tokio::main]
-async fn main() {
-    AppWorld::run("tests/features").await;
-}
-"#;
-
 /// Dependency block giving generated projects working file-rotating logging
 /// (10 MB rotation, 5 retained files) — mirrors `ironroot-log`'s defaults.
 const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
@@ -534,57 +464,1611 @@ const LOGGING_DEPS: &str = "tracing = \"0.1\"\n\
                             tracing-appender = \"0.2\"\n\
                             file-rotate = \"0.8\"\n";
 
-/// Snippet inserted into generated `main.rs` files that boots the default
-/// file-rotating logger. Mirrors `ironroot_log::init_default`.
-const LOGGING_BOOT: &str = r#"// --- default rotating-file logger (10MB, keep 5) -----------------------
-fn init_logging(app_name: &str) -> tracing_appender::non_blocking::WorkerGuard {
-    use file_rotate::{compression::Compression, suffix::AppendCount, ContentLimit, FileRotate};
-    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+// --- generated `src/` --------------------------------------------------------
+//
+// Every template below is written so the generated project passes its own
+// AGENTS.md §4 gate the moment it is created: the logic sits in a library
+// target with unit tests beside it, `main.rs` only collects input and calls in,
+// and the Gherkin scenarios drive the same library the unit tests do.
+//
+// The templates carry `{{package}}` (the cargo package name, e.g. `my-app`) and
+// `{{crate}}` (its Rust identifier, `my_app`); `fill` substitutes both.
 
-    std::fs::create_dir_all("logs").expect("create logs dir");
-    let path = std::path::Path::new("logs").join(format!("{app_name}.log"));
-    let rotator = FileRotate::new(
-        path,
-        AppendCount::new(5),
-        ContentLimit::Bytes(10 * 1024 * 1024),
+/// `src/logging.rs` — the single logging entry point required by `AGENTS.md`
+/// §6.2, in a shape both test layers can reach. Identical in every generated
+/// crate that logs, so it takes no substitutions.
+const LOGGING_RS: &str = r##"//! The one logging entry point for this crate — AGENTS.md §6.2.
+//!
+//! One library (`tracing`), configured once, centrally. Every line goes to a
+//! rotating file (10 MB per file, 5 kept) and to stdout. `main` calls [`init`]
+//! once and holds the guard it returns for the life of the process — dropping
+//! the guard is what flushes whatever the background writer still has buffered.
+//!
+//! The log directory and the filter spec are **parameters**, not globals read
+//! from inside the functions. That is the same rule AGENTS.md applies to
+//! business logic — inject the dependency — and it is what lets the tests at the
+//! bottom of this file drive every branch, including the failures, without
+//! writing into the working tree.
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use file_rotate::compression::Compression;
+use file_rotate::suffix::AppendCount;
+use file_rotate::{ContentLimit, FileRotate};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
+
+/// Bytes written to the current log file before it is rotated.
+pub const ROTATE_BYTES: usize = 10 * 1024 * 1024;
+
+/// How many rotated files are kept before the oldest is discarded.
+pub const KEEP_FILES: usize = 5;
+
+/// Filter used when `RUST_LOG` is unset or does not parse.
+pub const DEFAULT_FILTER: &str = "info";
+
+/// The file `app_name` logs to inside `dir`.
+#[must_use]
+pub fn log_path(dir: &Path, app_name: &str) -> PathBuf {
+    dir.join(format!("{app_name}.log"))
+}
+
+/// The filter built from `spec`, falling back to [`DEFAULT_FILTER`].
+///
+/// A malformed `RUST_LOG` falls back rather than aborting: losing the logs is a
+/// worse outcome than ignoring a typo in a filter.
+#[must_use]
+pub fn filter_from(spec: Option<&str>) -> EnvFilter {
+    spec.and_then(|spec| EnvFilter::try_new(spec).ok())
+        .unwrap_or_else(|| EnvFilter::new(DEFAULT_FILTER))
+}
+
+/// Installs the process-wide subscriber and returns its flush guard.
+///
+/// `dir` is created if it does not exist. Calling this a second time in one
+/// process leaves the first subscriber in place — a second install is a wiring
+/// mistake, not a reason to bring the process down.
+///
+/// # Errors
+///
+/// Returns the underlying [`io::Error`] when `dir` cannot be created.
+pub fn init(dir: &Path, app_name: &str) -> io::Result<WorkerGuard> {
+    let (writer, guard) = tracing_appender::non_blocking(rotating_file(dir, app_name)?);
+
+    let installed = tracing_subscriber::registry()
+        .with(filter_from(std::env::var("RUST_LOG").ok().as_deref()))
+        .with(fmt::layer().with_ansi(false).with_writer(writer))
+        .with(fmt::layer().with_writer(io::stdout))
+        .try_init();
+    if installed.is_err() {
+        tracing::debug!("a tracing subscriber is already installed; keeping it");
+    }
+
+    Ok(guard)
+}
+
+/// Opens the rotating log file, creating `dir` first.
+fn rotating_file(dir: &Path, app_name: &str) -> io::Result<FileRotate<AppendCount>> {
+    fs::create_dir_all(dir)?;
+    Ok(FileRotate::new(
+        log_path(dir, app_name),
+        AppendCount::new(KEEP_FILES),
+        ContentLimit::Bytes(ROTATE_BYTES),
         Compression::None,
         #[cfg(unix)]
         None,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory of our own under the OS temp dir, named after the calling
+    /// test so tests running in parallel never share one, and cleared first so
+    /// each run starts from a known state.
+    fn scratch(test: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "{}-{test}-{}",
+            env!("CARGO_PKG_NAME"),
+            std::process::id()
+        ));
+        let _unused = fs::remove_dir_all(&dir);
+        let _unused = fs::remove_file(&dir);
+        dir
+    }
+
+    #[test]
+    fn the_log_file_is_named_after_the_application() {
+        assert_eq!(
+            log_path(Path::new("logs"), "my-app"),
+            Path::new("logs").join("my-app.log")
+        );
+    }
+
+    #[test]
+    fn a_valid_filter_spec_is_used_as_given() {
+        assert_eq!(filter_from(Some("warn")).to_string(), "warn");
+    }
+
+    #[test]
+    fn no_filter_spec_falls_back_to_the_default() {
+        assert_eq!(filter_from(None).to_string(), DEFAULT_FILTER);
+    }
+
+    #[test]
+    fn a_malformed_filter_spec_falls_back_to_the_default() {
+        assert_eq!(
+            filter_from(Some("this=is=not=a=level")).to_string(),
+            DEFAULT_FILTER
+        );
+    }
+
+    #[test]
+    fn init_creates_the_directory_and_tolerates_a_second_call() {
+        let dir = scratch("init");
+        assert!(!dir.exists(), "the scratch directory starts clean");
+
+        let first = init(&dir, "test-app").expect("the first init installs the subscriber");
+        assert!(dir.is_dir(), "init creates the log directory");
+
+        let second = init(&dir, "test-app").expect("a second init is ignored, not an error");
+
+        drop((first, second));
+        let _unused = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_reports_a_log_directory_it_cannot_create() {
+        let dir = scratch("blocked");
+        fs::write(&dir, b"a file, not a directory").expect("the scratch path is writable");
+
+        assert!(
+            init(&dir, "test-app").is_err(),
+            "a file standing where the log directory should be is an error, not a panic"
+        );
+
+        let _unused = fs::remove_file(&dir);
+    }
+}
+"##;
+
+/// `src/lib.rs` for a CLI project.
+const CLI_LIB_RS: &str = r##"//! `{{package}}` — the library half of the CLI bootstrapped by ironroot.
+//!
+//! ## Why the logic lives here and not in `main`
+//!
+//! Every decision the binary makes lives in this library target so that both
+//! test layers required by [`AGENTS.md`](../AGENTS.md) §4 can reach it:
+//!
+//! - unit tests in the `tests` module at the bottom of this file (§4.1),
+//! - integration tests in `tests/smoke.rs` and cucumber scenarios in
+//!   `tests/features/`, executed by `tests/bdd.rs` (§4.2).
+//!
+//! `src/main.rs` does one thing: collect the arguments and hand them to
+//! [`respond`]. Keep it that way. Nothing in a binary target can be called from
+//! a unit test or from a cucumber step, so logic left in `main` counts against
+//! the 85% line-coverage gate in §4.3 with no way to cover it. It is also why
+//! [`respond`] takes the arguments as a parameter instead of reading
+//! [`std::env::args`] itself: a helper that reaches for process state cannot be
+//! driven from a scenario.
+//!
+//! ## Growing this file
+//!
+//! One module per bounded concept — `src/pricing.rs`, `src/auth.rs` — not one
+//! `utils.rs`. See AGENTS.md, "Business logic & helper modules".
+
+pub mod logging;
+
+/// The application name: the log file is named after it, and it opens the
+/// usage text.
+pub const APP_NAME: &str = "{{package}}";
+
+/// Directory the rotating log files are written to, relative to the working
+/// directory.
+pub const LOG_DIR: &str = "logs";
+
+/// Longest argument the CLI accepts, in characters.
+///
+/// A command line is untrusted input like any other, so it is bounded before it
+/// is interpreted — AGENTS.md §5.3. Raise this deliberately; do not delete it.
+pub const MAX_ARG_LEN: usize = 128;
+
+/// Who `hello` greets when it is given no name.
+pub const DEFAULT_GREETEE: &str = "world";
+
+/// Why a command line was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CliError {
+    /// An argument was longer than [`MAX_ARG_LEN`].
+    #[error("argument {position} is {length} characters long; the maximum is {max}")]
+    ArgumentTooLong {
+        /// 1-based position of the offending argument, program name excluded.
+        position: usize,
+        /// Its length in characters.
+        length: usize,
+        /// The limit it exceeded.
+        max: usize,
+    },
+    /// The first argument named a command that does not exist.
+    #[error("unknown command: {verb}")]
+    UnknownCommand {
+        /// The word that was not recognised.
+        verb: String,
+    },
+}
+
+/// A command line that parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// No arguments — print the version and the usage text.
+    Usage,
+    /// `hello [name]` — greet `name`.
+    Hello {
+        /// Who to greet; [`DEFAULT_GREETEE`] when the argument was omitted.
+        name: String,
+    },
+}
+
+/// Parses `args` — the command line *after* the program name, exactly as
+/// `std::env::args().skip(1)` yields it.
+///
+/// # Errors
+///
+/// [`CliError::ArgumentTooLong`] when any argument exceeds [`MAX_ARG_LEN`]; the
+/// length is checked before the verb is looked at, so an oversized argument
+/// never reaches a command. [`CliError::UnknownCommand`] when the first
+/// argument is not a command this binary knows.
+pub fn parse(args: &[String]) -> Result<Command, CliError> {
+    for (index, arg) in args.iter().enumerate() {
+        let length = arg.chars().count();
+        if length > MAX_ARG_LEN {
+            return Err(CliError::ArgumentTooLong {
+                position: index + 1,
+                length,
+                max: MAX_ARG_LEN,
+            });
+        }
+    }
+
+    let Some(verb) = args.first() else {
+        return Ok(Command::Usage);
+    };
+
+    match verb.as_str() {
+        "hello" => Ok(Command::Hello {
+            name: args
+                .get(1)
+                .map_or(DEFAULT_GREETEE, String::as_str)
+                .to_owned(),
+        }),
+        other => Err(CliError::UnknownCommand {
+            verb: other.to_owned(),
+        }),
+    }
+}
+
+/// Renders what a parsed `command` produces.
+#[must_use]
+pub fn render(command: &Command) -> String {
+    match command {
+        Command::Usage => usage(),
+        Command::Hello { name } => format!("hello, {name}!"),
+    }
+}
+
+/// The version banner and usage text shown when the CLI is given no arguments.
+#[must_use]
+pub fn usage() -> String {
+    [
+        format!("{APP_NAME} v{}", env!("CARGO_PKG_VERSION")),
+        format!("usage: {APP_NAME} <command> [args...]"),
+        String::new(),
+        "commands:".to_owned(),
+        format!("  hello [name]   greet [name], or {DEFAULT_GREETEE}"),
+    ]
+    .join("\n")
+}
+
+/// What the binary should write, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Response {
+    text: String,
+    failed: bool,
+}
+
+impl Response {
+    /// The text to write.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Whether it belongs on stderr rather than stdout.
+    #[must_use]
+    pub fn is_error(&self) -> bool {
+        self.failed
+    }
+
+    /// The status the process should exit with: `0` on success, `1` on a
+    /// refused command line.
+    #[must_use]
+    pub fn exit_status(&self) -> u8 {
+        u8::from(self.failed)
+    }
+}
+
+/// Handles a whole command line and reports what to print — the one function
+/// `main` calls.
+#[must_use]
+pub fn respond(args: &[String]) -> Response {
+    match parse(args) {
+        Ok(command) => {
+            tracing::info!(?command, "running command");
+            Response {
+                text: render(&command),
+                failed: false,
+            }
+        }
+        Err(error) => {
+            tracing::warn!(%error, "refused command line");
+            Response {
+                text: error.to_string(),
+                failed: true,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds an owned argument vector the way `main` collects one.
+    fn argv(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|arg| (*arg).to_owned()).collect()
+    }
+
+    #[test]
+    fn no_arguments_asks_for_the_usage_text() {
+        assert_eq!(parse(&argv(&[])), Ok(Command::Usage));
+    }
+
+    #[test]
+    fn hello_without_a_name_greets_the_world() {
+        assert_eq!(
+            parse(&argv(&["hello"])),
+            Ok(Command::Hello {
+                name: DEFAULT_GREETEE.to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn hello_takes_the_name_that_follows_it() {
+        assert_eq!(
+            parse(&argv(&["hello", "Alice"])),
+            Ok(Command::Hello {
+                name: "Alice".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_verb_is_refused() {
+        assert_eq!(
+            parse(&argv(&["goodbye"])),
+            Err(CliError::UnknownCommand {
+                verb: "goodbye".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn an_argument_at_the_limit_is_accepted() {
+        let at_limit = "a".repeat(MAX_ARG_LEN);
+        assert_eq!(
+            parse(&argv(&["hello", &at_limit])),
+            Ok(Command::Hello { name: at_limit })
+        );
+    }
+
+    #[test]
+    fn an_argument_past_the_limit_never_reaches_a_command() {
+        let too_long = "a".repeat(MAX_ARG_LEN + 1);
+        assert_eq!(
+            parse(&argv(&["hello", &too_long])),
+            Err(CliError::ArgumentTooLong {
+                position: 2,
+                length: MAX_ARG_LEN + 1,
+                max: MAX_ARG_LEN,
+            })
+        );
+    }
+
+    #[test]
+    fn the_limit_counts_characters_and_not_bytes() {
+        // `MAX_ARG_LEN` two-byte characters is exactly the limit, not twice it.
+        let wide = "é".repeat(MAX_ARG_LEN);
+        assert!(matches!(
+            parse(&argv(&[&wide])),
+            Err(CliError::UnknownCommand { .. })
+        ));
+    }
+
+    #[test]
+    fn the_usage_text_names_the_binary_and_its_commands() {
+        let text = render(&Command::Usage);
+
+        assert!(text.starts_with(APP_NAME));
+        assert!(text.contains(&format!("usage: {APP_NAME} <command>")));
+        assert!(text.contains("hello [name]"));
+    }
+
+    #[test]
+    fn hello_renders_a_greeting() {
+        assert_eq!(
+            render(&Command::Hello {
+                name: "Alice".to_owned()
+            }),
+            "hello, Alice!"
+        );
+    }
+
+    #[test]
+    fn a_command_line_that_parses_goes_to_stdout_and_exits_zero() {
+        let response = respond(&argv(&["hello", "Alice"]));
+
+        assert_eq!(response.text(), "hello, Alice!");
+        assert!(!response.is_error());
+        assert_eq!(response.exit_status(), 0);
+    }
+
+    #[test]
+    fn a_refused_command_line_goes_to_stderr_and_exits_non_zero() {
+        let response = respond(&argv(&["goodbye"]));
+
+        assert_eq!(response.text(), "unknown command: goodbye");
+        assert!(response.is_error());
+        assert_eq!(response.exit_status(), 1);
+    }
+
+    #[test]
+    fn the_length_error_says_which_argument_and_by_how_much() {
+        let error = CliError::ArgumentTooLong {
+            position: 2,
+            length: 500,
+            max: MAX_ARG_LEN,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            format!("argument 2 is 500 characters long; the maximum is {MAX_ARG_LEN}")
+        );
+    }
+}
+"##;
+
+/// `src/main.rs` for a CLI project — argument collection and one call in.
+const CLI_MAIN_RS: &str = r##"//! Binary entry point for `{{package}}`.
+//!
+//! Deliberately thin: install the logger, collect the arguments, hand them to
+//! [`{{crate}}::respond`], print what comes back. Everything worth testing lives
+//! in `src/lib.rs` — see the module docs there for why nothing may move back
+//! into this file.
+
+use std::path::Path;
+use std::process::ExitCode;
+
+use {{crate}}::{APP_NAME, LOG_DIR, logging, respond};
+
+fn main() -> Result<ExitCode, std::io::Error> {
+    let _log_guard = logging::init(Path::new(LOG_DIR), APP_NAME)?;
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let response = respond(&args);
+
+    if response.is_error() {
+        eprintln!("{}", response.text());
+    } else {
+        println!("{}", response.text());
+    }
+
+    Ok(ExitCode::from(response.exit_status()))
+}
+"##;
+
+/// `tests/smoke.rs` for a CLI project.
+const CLI_SMOKE_TEST: &str = r##"//! Integration tests — AGENTS.md §4.1, from outside the crate.
+//!
+//! `src/lib.rs` holds the unit tests and `tests/bdd.rs` the scenarios. This
+//! file is the third view: it links `{{crate}}` as an external crate, so
+//! everything it touches has to genuinely be `pub` and usable the way `main`
+//! uses it.
+
+use {{crate}}::{Command, DEFAULT_GREETEE, MAX_ARG_LEN, parse, respond};
+
+fn argv(raw: &[&str]) -> Vec<String> {
+    raw.iter().map(|arg| (*arg).to_owned()).collect()
+}
+
+#[test]
+fn the_public_api_alone_is_enough_to_greet() {
+    let response = respond(&argv(&["hello", "Alice"]));
+
+    assert_eq!(response.text(), "hello, Alice!");
+    assert!(!response.is_error());
+    assert_eq!(response.exit_status(), 0);
+}
+
+#[test]
+fn an_empty_command_line_explains_how_the_tool_is_invoked() {
+    assert_eq!(parse(&argv(&[])), Ok(Command::Usage));
+
+    let response = respond(&argv(&[]));
+
+    assert!(response.text().contains("usage:"));
+    assert!(response.text().contains(DEFAULT_GREETEE));
+    assert!(!response.is_error());
+}
+
+#[test]
+fn an_over_long_argument_is_refused_before_it_is_interpreted() {
+    let response = respond(&argv(&["hello", &"a".repeat(MAX_ARG_LEN + 1)]));
+
+    assert!(response.is_error());
+    assert_eq!(response.exit_status(), 1);
+    assert!(response.text().contains(&MAX_ARG_LEN.to_string()));
+}
+"##;
+
+/// `tests/features/command-line.feature` for a CLI project.
+const CLI_FEATURE: &str = r##"Feature: Command line handling
+
+  `{{package}}` ships with one placeholder command. Until the real ones land it
+  either greets, explains how it should be invoked, or refuses the command line
+  and says why — it never silently does nothing.
+
+  Scenario: hello greets the name it is given
+    Given the command line "hello Alice"
+    When the command line is handled
+    Then the invocation succeeds
+    And the output should contain "hello, Alice!"
+
+  Scenario: hello with no name greets the world
+    Given the command line "hello"
+    When the command line is handled
+    Then the invocation succeeds
+    And the output should contain "hello, world!"
+
+  Scenario: No arguments explain how the tool is invoked
+    Given an empty command line
+    When the command line is handled
+    Then the invocation succeeds
+    And the output should contain "usage:"
+    And the output should contain "hello [name]"
+
+  Scenario: An unknown command is refused
+    Given the command line "goodbye"
+    When the command line is handled
+    Then the invocation fails
+    And the output should contain "unknown command: goodbye"
+
+  Scenario: An argument past the length limit is refused
+    Given the command line "hello" followed by an argument of 500 characters
+    When the command line is handled
+    Then the invocation fails
+    And the output should contain "the maximum is"
+"##;
+
+/// `tests/bdd.rs` for a CLI project.
+const CLI_BDD_RUNNER: &str = r##"//! BDD runner — executes every `.feature` file under `tests/features/`.
+//! AGENTS.md §4.2.
+//!
+//! Run with `make bdd`, or `cargo test --test bdd`.
+//!
+//! Steps stay thin: parse the Gherkin argument, call one helper from `src/`,
+//! assert. Logic written inside a step is logic the unit tests and the coverage
+//! gate never see — which is the one thing this layer exists to prevent.
+//!
+//! This target sets `harness = false` in `Cargo.toml` because cucumber brings
+//! its own runner; `fn main` at the bottom is what `cargo test` executes.
+
+use cucumber::{World, given, then, when};
+
+use {{crate}}::{Response, respond};
+
+/// State carried between the steps of a single scenario.
+#[derive(Debug, Default, World)]
+pub struct AppWorld {
+    /// The command line, after the program name.
+    args: Vec<String>,
+    /// What the most recent `When` step produced.
+    response: Option<Response>,
+}
+
+impl AppWorld {
+    /// The response produced earlier in the scenario.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no `When` step ran first — a wiring mistake in the feature
+    /// file, which should fail loudly rather than assert against nothing.
+    fn response(&self) -> &Response {
+        self.response
+            .as_ref()
+            .expect("a `When` step must handle the command line before a `Then` step inspects it")
+    }
+}
+
+#[given(expr = "the command line {string}")]
+async fn given_command_line(world: &mut AppWorld, line: String) {
+    world.args = line.split_whitespace().map(ToOwned::to_owned).collect();
+}
+
+#[given("an empty command line")]
+async fn given_empty_command_line(world: &mut AppWorld) {
+    world.args.clear();
+}
+
+#[given(expr = "the command line {string} followed by an argument of {int} characters")]
+async fn given_padded_command_line(world: &mut AppWorld, verb: String, length: usize) {
+    world.args = vec![verb, "a".repeat(length)];
+}
+
+#[when("the command line is handled")]
+async fn when_handled(world: &mut AppWorld) {
+    world.response = Some(respond(&world.args));
+}
+
+#[then("the invocation succeeds")]
+async fn then_succeeds(world: &mut AppWorld) {
+    let response = world.response();
+    assert!(
+        !response.is_error(),
+        "expected success, got the error:\n{}",
+        response.text()
     );
-    let (writer, guard) = tracing_appender::non_blocking(rotator);
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt::layer().with_ansi(false).with_writer(writer))
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .init();
-    guard
 }
-"#;
 
-const CLI_SMOKE_TEST: &str = r#"//! Smoke test — the binary should build and the basic helper works.
+#[then("the invocation fails")]
+async fn then_fails(world: &mut AppWorld) {
+    let response = world.response();
+    assert!(
+        response.is_error(),
+        "expected a refusal, got:\n{}",
+        response.text()
+    );
+}
+
+#[then(expr = "the output should contain {string}")]
+async fn then_output_contains(world: &mut AppWorld, expected: String) {
+    let text = world.response().text();
+    assert!(
+        text.contains(&expected),
+        "expected the output to contain {expected:?}, got:\n{text}"
+    );
+}
+
+#[then(expr = "the output should not contain {string}")]
+async fn then_output_excludes(world: &mut AppWorld, forbidden: String) {
+    let text = world.response().text();
+    assert!(
+        !text.contains(&forbidden),
+        "expected the output not to contain {forbidden:?}, got:\n{text}"
+    );
+}
+
+#[tokio::main]
+async fn main() {
+    AppWorld::run("tests/features").await;
+}
+"##;
+
+/// `src/lib.rs` for an HTTP server, used both by the `webapp` kind and by the
+/// `server/` member of a client/server workspace.
+const SERVER_LIB_RS: &str = r##"//! `{{package}}` — the library half of the HTTP server bootstrapped by ironroot.
+//!
+//! ## Why the logic lives here and not in `main`
+//!
+//! The router and its handlers live in this library target so that both test
+//! layers required by [`AGENTS.md`](../AGENTS.md) §4 can reach them:
+//!
+//! - unit tests in the `tests` module at the bottom of this file (§4.1),
+//! - integration tests in `tests/smoke.rs` and cucumber scenarios in
+//!   `tests/features/`, executed by `tests/bdd.rs` (§4.2).
+//!
+//! `src/main.rs` does one thing: read the environment and hand the router to
+//! `axum::serve`. Keep it that way. Nothing in a binary target can be called
+//! from a unit test or from a cucumber step, so a handler defined in `main` is a
+//! handler that counts against the 85% line-coverage gate in §4.3 with no way to
+//! cover it. Because [`router`] is a value rather than a running server, the
+//! tests drive it in-process with `tower`'s `oneshot` — no socket, no port, no
+//! flake.
+//!
+//! ## Growing this file
+//!
+//! Routes stay thin. Put the work in one module per bounded concept —
+//! `src/pricing.rs`, `src/auth.rs` — and let the handler call it. See
+//! AGENTS.md, "Business logic & helper modules".
+
+pub mod logging;
+
+use axum::Router;
+use axum::routing::get;
+
+/// The application name: the log file is named after it.
+pub const APP_NAME: &str = "{{package}}";
+
+/// Directory the rotating log files are written to, relative to the working
+/// directory.
+pub const LOG_DIR: &str = "logs";
+
+/// Address the server binds when `BIND_ADDR` is unset or blank.
+pub const DEFAULT_BIND_ADDR: &str = "0.0.0.0:3000";
+
+/// Builds the application router.
+///
+/// Register new routes here so every one of them is reachable from a test.
+/// AGENTS.md §5.3 applies from the first route that takes input: bound it,
+/// validate it server-side, and authorize through the single entry point.
+pub fn router() -> Router {
+    Router::new()
+        .route("/", get(root))
+        .route("/health", get(health))
+}
+
+/// `GET /` — the placeholder index.
+pub async fn root() -> &'static str {
+    "ok"
+}
+
+/// `GET /health` — the liveness probe. Deliberately says nothing about the
+/// process beyond "it answers": a health endpoint is unauthenticated, so it
+/// leaks no version, hostname, or dependency state (AGENTS.md §5.3).
+pub async fn health() -> &'static str {
+    "healthy"
+}
+
+/// The address to bind, given the value of `BIND_ADDR`.
+///
+/// The environment is read by `main` and passed in, so every branch here is
+/// testable and no test can be disturbed by the environment it runs in.
+#[must_use]
+pub fn bind_addr(configured: Option<&str>) -> String {
+    match configured.map(str::trim) {
+        Some(addr) if !addr.is_empty() => addr.to_owned(),
+        _ => DEFAULT_BIND_ADDR.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    /// Drives `router()` in-process and returns the status and body of `path`.
+    async fn get(path: &str) -> (StatusCode, String) {
+        let request = Request::builder()
+            .uri(path)
+            .body(Body::empty())
+            .expect("the test builds a valid request");
+        let response = router()
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("the test bodies are small");
+
+        (
+            status,
+            String::from_utf8(body.to_vec()).expect("utf-8 body"),
+        )
+    }
+
+    #[tokio::test]
+    async fn the_index_answers_ok() {
+        assert_eq!(get("/").await, (StatusCode::OK, "ok".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn the_health_probe_answers_healthy() {
+        assert_eq!(get("/health").await, (StatusCode::OK, "healthy".to_owned()));
+    }
+
+    #[tokio::test]
+    async fn the_health_probe_leaks_nothing_about_the_process() {
+        let (_, body) = get("/health").await;
+
+        assert!(!body.contains(env!("CARGO_PKG_VERSION")));
+        assert_eq!(body.lines().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unregistered_path_is_a_404() {
+        let (status, _) = get("/does-not-exist").await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn a_configured_bind_address_is_used_as_given() {
+        assert_eq!(bind_addr(Some("127.0.0.1:8080")), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn an_unset_bind_address_falls_back_to_the_default() {
+        assert_eq!(bind_addr(None), DEFAULT_BIND_ADDR);
+    }
+
+    #[test]
+    fn a_blank_bind_address_falls_back_rather_than_binding_nothing() {
+        assert_eq!(bind_addr(Some("   ")), DEFAULT_BIND_ADDR);
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed_off_the_bind_address() {
+        assert_eq!(bind_addr(Some("  0.0.0.0:9000 ")), "0.0.0.0:9000");
+    }
+}
+"##;
+
+/// `src/main.rs` for an HTTP server — environment, then one call in.
+const SERVER_MAIN_RS: &str = r##"//! Binary entry point for `{{package}}`.
+//!
+//! Deliberately thin: install the logger, read the environment, bind, and serve
+//! [`{{crate}}::router`]. Everything worth testing lives in `src/lib.rs` — see
+//! the module docs there for why no handler may move back into this file.
+
+use std::path::Path;
+
+use {{crate}}::{APP_NAME, LOG_DIR, bind_addr, logging, router};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _log_guard = logging::init(Path::new(LOG_DIR), APP_NAME)?;
+
+    let addr = bind_addr(std::env::var("BIND_ADDR").ok().as_deref());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    tracing::info!(%addr, "listening");
+
+    axum::serve(listener, router()).await?;
+
+    Ok(())
+}
+"##;
+
+/// `tests/smoke.rs` for an HTTP server.
+const SERVER_SMOKE_TEST: &str = r##"//! Integration tests — AGENTS.md §4.1, from outside the crate.
+//!
+//! `src/lib.rs` holds the unit tests and `tests/bdd.rs` the scenarios. This
+//! file is the third view: it links `{{crate}}` as an external crate and drives
+//! the router the way a caller would, so everything it touches has to genuinely
+//! be `pub`.
+
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode};
+use tower::ServiceExt;
+
+use {{crate}}::{DEFAULT_BIND_ADDR, bind_addr, router};
+
+#[tokio::test]
+async fn every_registered_route_answers() {
+    for (path, expected) in [("/", "ok"), ("/health", "healthy")] {
+        let request = Request::builder()
+            .uri(path)
+            .body(Body::empty())
+            .expect("the test builds a valid request");
+        let response = router()
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+
+        assert_eq!(response.status(), StatusCode::OK, "GET {path}");
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("the test bodies are small");
+        assert_eq!(body.as_ref(), expected.as_bytes(), "GET {path}");
+    }
+}
 
 #[test]
-fn smoke() {
-    assert_eq!(2 + 2, 4);
+fn the_bind_address_is_configurable_and_has_a_safe_default() {
+    assert_eq!(bind_addr(Some("127.0.0.1:0")), "127.0.0.1:0");
+    assert_eq!(bind_addr(None), DEFAULT_BIND_ADDR);
 }
-"#;
+"##;
 
-const WEBAPP_SMOKE_TEST: &str = r#"//! Smoke test placeholder for the HTTP server.
+/// `tests/features/endpoints.feature` for an HTTP server.
+const SERVER_FEATURE: &str = r##"Feature: HTTP endpoints
+
+  `{{package}}` answers two placeholder routes. They exist so the harness is
+  wired end to end; replace them with the real ones and keep a scenario per
+  route, negative cases included.
+
+  Scenario: The index answers
+    When a GET request is made to "/"
+    Then the response status should be 200
+    And the response body should be "ok"
+
+  Scenario: The health probe answers
+    When a GET request is made to "/health"
+    Then the response status should be 200
+    And the response body should be "healthy"
+
+  Scenario: The health probe does not describe the process
+    When a GET request is made to "/health"
+    Then the response body should not contain "version"
+
+  Scenario: An unregistered path is not found
+    When a GET request is made to "/does-not-exist"
+    Then the response status should be 404
+"##;
+
+/// `tests/bdd.rs` for an HTTP server.
+const SERVER_BDD_RUNNER: &str = r##"//! BDD runner — executes every `.feature` file under `tests/features/`.
+//! AGENTS.md §4.2.
+//!
+//! Run with `make bdd`, or `cargo test --test bdd`.
+//!
+//! Steps stay thin: parse the Gherkin argument, call one helper from `src/`,
+//! assert. The router is driven in-process through `tower`'s `oneshot`, so a
+//! scenario needs no port and cannot race another one.
+//!
+//! This target sets `harness = false` in `Cargo.toml` because cucumber brings
+//! its own runner; `fn main` at the bottom is what `cargo test` executes.
+
+use axum::body::{Body, to_bytes};
+use axum::http::{Request, StatusCode};
+use cucumber::{World, then, when};
+use tower::ServiceExt;
+
+use {{crate}}::router;
+
+/// State carried between the steps of a single scenario.
+#[derive(Debug, Default, World)]
+pub struct AppWorld {
+    /// Status of the most recent response.
+    status: Option<StatusCode>,
+    /// Body of the most recent response.
+    body: String,
+}
+
+impl AppWorld {
+    /// The status of the response fetched earlier in the scenario.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no `When` step ran first — a wiring mistake in the feature
+    /// file, which should fail loudly rather than assert against nothing.
+    fn status(&self) -> StatusCode {
+        self.status
+            .expect("a `When` step must make a request before a `Then` step inspects it")
+    }
+}
+
+#[when(expr = "a GET request is made to {string}")]
+async fn when_get(world: &mut AppWorld, path: String) {
+    let request = Request::builder()
+        .uri(&path)
+        .body(Body::empty())
+        .expect("the scenario supplies a valid path");
+    let response = router()
+        .oneshot(request)
+        .await
+        .expect("the router is infallible");
+
+    world.status = Some(response.status());
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("the scenario bodies are small");
+    world.body = String::from_utf8(body.to_vec()).expect("utf-8 body");
+}
+
+#[then(expr = "the response status should be {int}")]
+async fn then_status(world: &mut AppWorld, expected: u16) {
+    assert_eq!(world.status().as_u16(), expected);
+}
+
+#[then(expr = "the response body should be {string}")]
+async fn then_body_is(world: &mut AppWorld, expected: String) {
+    assert_eq!(world.body, expected);
+}
+
+#[then(expr = "the response body should not contain {string}")]
+async fn then_body_excludes(world: &mut AppWorld, forbidden: String) {
+    let body = world.body.to_lowercase();
+    assert!(
+        !body.contains(&forbidden.to_lowercase()),
+        "expected the body not to contain {forbidden:?}, got:\n{body}"
+    );
+}
+
+#[tokio::main]
+async fn main() {
+    AppWorld::run("tests/features").await;
+}
+"##;
+
+/// The toolkit-free core of the desktop client's `src/lib.rs`, shared by both
+/// GUI backends. Concatenated with a shell and the test module by
+/// `client_lib_rs`.
+const CLIENT_LIB_CORE: &str = r##"//! `{{package}}` — the library half of the desktop client bootstrapped by
+//! ironroot.
+//!
+//! ## Why the logic lives here and not in `main`
+//!
+//! [`AppState`] holds no GUI type at all. That is deliberate, and it is what
+//! lets both test layers required by [`AGENTS.md`](../AGENTS.md) §4 reach the
+//! client's behaviour without opening a window:
+//!
+//! - unit tests in the `tests` module at the bottom of this file (§4.1),
+//! - integration tests in `tests/smoke.rs` and cucumber scenarios in
+//!   `tests/features/`, executed by `tests/bdd.rs` (§4.2).
+//!
+//! `src/main.rs` does one thing: call into this library. Keep it that way, and
+//! keep the UI callbacks below just as thin. Nothing in a binary target — and
+//! nothing that only runs from an event handler — can be called from a unit test
+//! or from a cucumber step, so it counts against the 85% line-coverage gate in
+//! §4.3 with no way to cover it.
+
+/// Text shown at the top of the client.
+pub const HEADING: &str = "Hello from {{package}}";
+
+/// Longest name the greeter accepts, in characters.
+///
+/// A form field is untrusted input like any other, so it is bounded before it
+/// is used — AGENTS.md §5.3. Raise this deliberately; do not delete it.
+pub const MAX_NAME_LEN: usize = 64;
+
+/// Why a name was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NameError {
+    /// Nothing was typed, or only whitespace was.
+    #[error("please type a name first")]
+    Blank,
+    /// The name was longer than [`MAX_NAME_LEN`].
+    #[error("a name is at most {max} characters; this one is {length}")]
+    TooLong {
+        /// Its length in characters.
+        length: usize,
+        /// The limit it exceeded.
+        max: usize,
+    },
+}
+
+/// Everything the client knows, with no GUI type anywhere in it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct AppState {
+    name: String,
+    message: String,
+}
+
+impl AppState {
+    /// A client with nothing typed and nothing said yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The name currently typed in.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The buffer the text field writes into.
+    pub fn name_mut(&mut self) -> &mut String {
+        &mut self.name
+    }
+
+    /// The last thing the client had to say — empty until [`AppState::greet`]
+    /// has run.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The greeting for the name currently typed in.
+    ///
+    /// # Errors
+    ///
+    /// [`NameError::Blank`] when nothing but whitespace was typed, and
+    /// [`NameError::TooLong`] when the name exceeds [`MAX_NAME_LEN`].
+    pub fn greeting(&self) -> Result<String, NameError> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(NameError::Blank);
+        }
+
+        let length = name.chars().count();
+        if length > MAX_NAME_LEN {
+            return Err(NameError::TooLong {
+                length,
+                max: MAX_NAME_LEN,
+            });
+        }
+
+        Ok(format!("Hello, {name}!"))
+    }
+
+    /// Handles the greet action and stores what the client should display.
+    ///
+    /// A refusal is stored as a message too. A validation rule the user never
+    /// sees fire is a rule they will keep tripping over.
+    pub fn greet(&mut self) -> &str {
+        self.message = match self.greeting() {
+            Ok(greeting) => greeting,
+            Err(error) => error.to_string(),
+        };
+        &self.message
+    }
+}
+"##;
+
+/// The egui shell appended to [`CLIENT_LIB_CORE`]: an [`eframe::App`] that only
+/// moves values between the widgets and `AppState`.
+const EGUI_SHELL: &str = r##"
+/// The eframe shell. It owns an [`AppState`] and does nothing but move values
+/// between the widgets and that state — every decision belongs above, where the
+/// tests can reach it.
+#[derive(Debug, Default)]
+pub struct DesktopApp {
+    state: AppState,
+}
+
+impl DesktopApp {
+    /// The state behind the window.
+    ///
+    /// Exposed so the tests can assert on the client without opening one; the
+    /// widgets below are the only other thing that touches it.
+    #[must_use]
+    pub fn state(&self) -> &AppState {
+        &self.state
+    }
+
+    /// Lays the client out into `ui`.
+    ///
+    /// Split out of the [`eframe::App`] impl deliberately: this takes only an
+    /// `egui::Ui`, which `egui::__run_test_ui` can hand it headlessly, while the
+    /// `eframe::Frame` the trait method also receives cannot be built outside a
+    /// running window. That one parameter is the difference between a layout
+    /// the tests cover and a layout only the coverage gate ever sees.
+    ///
+    /// Every line here moves a value. The moment one of them decides something,
+    /// the decision belongs in [`AppState`].
+    pub fn draw(&mut self, ui: &mut eframe::egui::Ui) {
+        ui.heading(HEADING);
+        ui.horizontal(|ui| {
+            ui.label("Your name:");
+            ui.text_edit_singleline(self.state.name_mut());
+        });
+        if ui.button("Greet").clicked() {
+            self.state.greet();
+        }
+        if !self.state.message().is_empty() {
+            ui.label(self.state.message());
+        }
+    }
+}
+
+impl eframe::App for DesktopApp {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw(ui);
+    }
+}
+
+/// Opens the window and runs until the user closes it.
+///
+/// # Errors
+///
+/// Propagates whatever eframe reports when the window cannot be created.
+pub fn run() -> eframe::Result {
+    eframe::run_native(
+        "{{package}}",
+        eframe::NativeOptions::default(),
+        Box::new(|_cc| Ok(Box::<DesktopApp>::default())),
+    )
+}
+"##;
+
+/// The Tauri shell appended to [`CLIENT_LIB_CORE`]. A real Tauri project needs
+/// `tauri.conf.json`, icons, and a frontend build, so all this can honestly do
+/// yet is say so — but it says it through a function the tests can call.
+const TAURI_SHELL: &str = r##"
+/// The placeholder banner the binary prints.
+///
+/// A real Tauri project needs `tauri.conf.json`, icons, and a frontend build
+/// step, none of which this scaffold can invent. Run `cargo tauri init` inside
+/// this crate and see <https://tauri.app> for the full setup.
+///
+/// [`AppState::greet`] above is already the shape a `#[tauri::command]` wants:
+/// take the input, validate it, return `Result`. Wire it up as the first
+/// command and the scenarios in `tests/features/` keep covering it unchanged.
+#[must_use]
+pub fn banner() -> String {
+    [
+        HEADING.to_owned(),
+        "-".repeat(HEADING.chars().count()),
+        "TODO: Open a native window using Tauri".to_owned(),
+        "  1. cargo tauri init      (generates tauri.conf.json and icons)".to_owned(),
+        "  2. expose AppState::greet as a #[tauri::command]".to_owned(),
+        "  3. point the config at the frontend/ directory".to_owned(),
+        String::new(),
+        "See README.md for the full guide.".to_owned(),
+    ]
+    .join("\n")
+}
+"##;
+
+/// The test module appended to the desktop client's `src/lib.rs`. It exercises
+/// the toolkit-free core, which is all of the client's behaviour.
+const CLIENT_LIB_TESTS: &str = r##"
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client with `name` already typed into the field.
+    fn typed(name: &str) -> AppState {
+        let mut state = AppState::new();
+        state.name_mut().push_str(name);
+        state
+    }
+
+    #[test]
+    fn a_fresh_client_has_nothing_typed_and_nothing_to_say() {
+        let state = AppState::new();
+
+        assert_eq!(state.name(), "");
+        assert_eq!(state.message(), "");
+        assert_eq!(state, AppState::default());
+    }
+
+    #[test]
+    fn the_heading_names_the_application() {
+        assert!(HEADING.contains("{{package}}"));
+    }
+
+    #[test]
+    fn a_name_is_greeted_by_name() {
+        assert_eq!(typed("Alice").greeting(), Ok("Hello, Alice!".to_owned()));
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed_before_greeting() {
+        assert_eq!(
+            typed("  Alice \n").greeting(),
+            Ok("Hello, Alice!".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_empty_field_is_refused() {
+        assert_eq!(typed("").greeting(), Err(NameError::Blank));
+    }
+
+    #[test]
+    fn a_field_holding_only_whitespace_is_refused_too() {
+        assert_eq!(typed("   \t ").greeting(), Err(NameError::Blank));
+    }
+
+    #[test]
+    fn a_name_at_the_limit_is_accepted() {
+        let at_limit = "a".repeat(MAX_NAME_LEN);
+
+        assert_eq!(
+            typed(&at_limit).greeting(),
+            Ok(format!("Hello, {at_limit}!"))
+        );
+    }
+
+    #[test]
+    fn a_name_past_the_limit_is_refused() {
+        assert_eq!(
+            typed(&"a".repeat(MAX_NAME_LEN + 1)).greeting(),
+            Err(NameError::TooLong {
+                length: MAX_NAME_LEN + 1,
+                max: MAX_NAME_LEN,
+            })
+        );
+    }
+
+    #[test]
+    fn the_limit_counts_characters_and_not_bytes() {
+        // `MAX_NAME_LEN` two-byte characters is exactly the limit, not twice it.
+        let wide = "é".repeat(MAX_NAME_LEN);
+
+        assert!(typed(&wide).greeting().is_ok());
+    }
+
+    #[test]
+    fn greeting_stores_what_the_client_should_display() {
+        let mut state = typed("Alice");
+
+        assert_eq!(state.greet(), "Hello, Alice!");
+        assert_eq!(state.message(), "Hello, Alice!");
+    }
+
+    #[test]
+    fn a_refusal_is_displayed_rather_than_swallowed() {
+        let mut state = typed("");
+
+        assert_eq!(state.greet(), NameError::Blank.to_string());
+        assert!(!state.message().is_empty());
+    }
+"##;
+
+/// Backend-specific tests appended to [`CLIENT_LIB_TESTS`] for the egui shell.
+const EGUI_SHELL_TESTS: &str = r##"
+    #[test]
+    fn the_window_starts_on_a_fresh_client() {
+        assert_eq!(DesktopApp::default().state(), &AppState::new());
+    }
+
+    #[test]
+    fn the_layout_draws_headlessly_and_decides_nothing() {
+        let mut app = DesktopApp::default();
+
+        // `__run_test_ui` is egui's own headless harness: a real `Ui`, no
+        // window, no GPU. It is what keeps the layout inside the coverage gate.
+        eframe::egui::__run_test_ui(|ui| app.draw(ui));
+
+        assert_eq!(
+            app.state(),
+            &AppState::new(),
+            "drawing moves values; it does not decide anything"
+        );
+    }
+
+    #[test]
+    fn the_layout_shows_whatever_the_client_last_said() {
+        let mut app = DesktopApp::default();
+        app.state.name_mut().push_str("Alice");
+        app.state.greet();
+
+        eframe::egui::__run_test_ui(|ui| app.draw(ui));
+
+        assert_eq!(app.state().message(), "Hello, Alice!");
+    }
+"##;
+
+/// Backend-specific tests appended to [`CLIENT_LIB_TESTS`] for the Tauri shell.
+const TAURI_SHELL_TESTS: &str = r##"
+    #[test]
+    fn the_banner_underlines_the_heading() {
+        let text = banner();
+        let mut lines = text.lines();
+        let title = lines.next().expect("the banner opens with the heading");
+        let rule = lines.next().expect("the heading is underlined");
+
+        assert_eq!(title, HEADING);
+        assert_eq!(rule.chars().count(), title.chars().count());
+        assert!(rule.chars().all(|dash| dash == '-'));
+    }
+
+    #[test]
+    fn the_banner_says_what_is_still_missing() {
+        let text = banner();
+
+        assert!(text.contains("cargo tauri init"));
+        assert!(text.contains("#[tauri::command]"));
+    }
+
+    #[test]
+    fn the_banner_does_not_claim_a_window_was_opened() {
+        let text = banner().to_lowercase();
+
+        assert!(!text.contains("window opened"));
+        assert!(text.contains("todo:"));
+    }
+
+    #[test]
+    fn the_banner_is_one_block_without_a_trailing_newline() {
+        let text = banner();
+
+        assert!(!text.ends_with('\n'));
+        assert!(text.lines().count() > 1);
+    }
+"##;
+
+/// Closes the desktop client's `mod tests`, after the shared tests and whatever
+/// the chosen backend added to them.
+const CLIENT_LIB_TESTS_END: &str = r##"}
+"##;
+
+/// `src/main.rs` for an egui desktop client.
+const EGUI_MAIN_RS: &str = r##"//! Binary entry point for the `{{package}}` desktop client (egui).
+//!
+//! Deliberately trivial: everything worth testing lives in [`{{crate}}`], the
+//! library target next door. See `src/lib.rs` for the rationale and for the
+//! TODO list that turns this scaffold into a real client.
+
+fn main() -> eframe::Result {
+    {{crate}}::run()
+}
+"##;
+
+/// `src/main.rs` for a Tauri desktop client.
+const TAURI_MAIN_RS: &str = r##"//! Binary entry point for the `{{package}}` desktop client (Tauri).
+//!
+//! Deliberately trivial: everything worth testing lives in [`{{crate}}`], the
+//! library target next door. See `src/lib.rs` for the rationale and for the
+//! TODO list that turns this scaffold into a real client.
+
+fn main() {
+    println!("{}", {{crate}}::banner());
+}
+"##;
+
+/// `tests/smoke.rs` for a desktop client.
+const CLIENT_SMOKE_TEST: &str = r##"//! Integration tests — AGENTS.md §4.1, from outside the crate.
+//!
+//! `src/lib.rs` holds the unit tests and `tests/bdd.rs` the scenarios. This
+//! file is the third view: it links `{{crate}}` as an external crate, so
+//! everything it touches has to genuinely be `pub`.
+//!
+//! Note what is *not* here: no window is opened. Every one of the client's
+//! decisions lives in `AppState`, which is why this file can exist at all.
+
+use {{crate}}::{AppState, HEADING, MAX_NAME_LEN, NameError};
 
 #[test]
-fn smoke() {
-    assert!(true, "replace with a real handler test");
-}
-"#;
+fn the_public_api_alone_is_enough_to_greet() {
+    let mut state = AppState::new();
+    state.name_mut().push_str("Alice");
 
-const CLIENT_SMOKE_TEST: &str = r#"//! Smoke test placeholder for the desktop client.
+    assert_eq!(state.greet(), "Hello, Alice!");
+    assert_eq!(state.message(), "Hello, Alice!");
+}
 
 #[test]
-fn smoke() {
-    assert!(true, "replace with a real UI/state test");
+fn the_heading_is_available_to_whatever_draws_it() {
+    assert!(!HEADING.is_empty());
 }
-"#;
+
+#[test]
+fn an_over_long_name_is_refused_with_the_limit_it_broke() {
+    let mut state = AppState::new();
+    state.name_mut().push_str(&"a".repeat(MAX_NAME_LEN + 1));
+
+    assert_eq!(
+        state.greeting(),
+        Err(NameError::TooLong {
+            length: MAX_NAME_LEN + 1,
+            max: MAX_NAME_LEN,
+        })
+    );
+}
+"##;
+
+/// `tests/features/greeting.feature` for a desktop client.
+const CLIENT_FEATURE: &str = r##"Feature: Greeting
+
+  `{{package}}` greets whoever is named in its one input field. The field is
+  untrusted input like any other, so the scenarios below cover what it refuses
+  as carefully as what it accepts.
+
+  Scenario: A name is greeted by name
+    Given the name "Alice" is typed in
+    When the client greets
+    Then the client should say "Hello, Alice!"
+
+  Scenario: Surrounding whitespace is ignored
+    Given the name "  Alice  " is typed in
+    When the client greets
+    Then the client should say "Hello, Alice!"
+
+  Scenario: An empty field is refused
+    Given nothing is typed in
+    When the client greets
+    Then the client should say "please type a name first"
+
+  Scenario: A name past the length limit is refused
+    Given a name of 500 characters is typed in
+    When the client greets
+    Then the client should complain about the length
+    And the client should not say "Hello"
+"##;
+
+/// `tests/bdd.rs` for a desktop client.
+const CLIENT_BDD_RUNNER: &str = r##"//! BDD runner — executes every `.feature` file under `tests/features/`.
+//! AGENTS.md §4.2.
+//!
+//! Run with `make bdd`, or `cargo test --test bdd`.
+//!
+//! Steps stay thin: parse the Gherkin argument, call one helper from `src/`,
+//! assert. No window is opened — the scenarios drive `AppState`, which is the
+//! whole reason the client's decisions live there and not in a UI callback.
+//!
+//! This target sets `harness = false` in `Cargo.toml` because cucumber brings
+//! its own runner; `fn main` at the bottom is what `cargo test` executes.
+
+use cucumber::{World, given, then, when};
+
+use {{crate}}::{AppState, MAX_NAME_LEN};
+
+/// State carried between the steps of a single scenario.
+#[derive(Debug, Default, World)]
+pub struct AppWorld {
+    /// The client under test.
+    client: AppState,
+    /// What it said the last time it was asked to greet.
+    said: Option<String>,
+}
+
+impl AppWorld {
+    /// What the client said earlier in the scenario.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no `When` step ran first — a wiring mistake in the feature
+    /// file, which should fail loudly rather than assert against nothing.
+    fn said(&self) -> &str {
+        self.said
+            .as_deref()
+            .expect("a `When` step must greet before a `Then` step inspects what was said")
+    }
+}
+
+#[given(expr = "the name {string} is typed in")]
+async fn given_name(world: &mut AppWorld, name: String) {
+    world.client.name_mut().push_str(&name);
+}
+
+#[given("nothing is typed in")]
+async fn given_nothing(world: &mut AppWorld) {
+    world.client.name_mut().clear();
+}
+
+#[given(expr = "a name of {int} characters is typed in")]
+async fn given_long_name(world: &mut AppWorld, length: usize) {
+    world.client.name_mut().push_str(&"a".repeat(length));
+}
+
+#[when("the client greets")]
+async fn when_greeting(world: &mut AppWorld) {
+    world.said = Some(world.client.greet().to_owned());
+}
+
+#[then(expr = "the client should say {string}")]
+async fn then_says(world: &mut AppWorld, expected: String) {
+    assert_eq!(world.said(), expected);
+}
+
+#[then(expr = "the client should not say {string}")]
+async fn then_does_not_say(world: &mut AppWorld, forbidden: String) {
+    let said = world.said();
+    assert!(
+        !said.contains(&forbidden),
+        "expected {forbidden:?} not to be said, got:\n{said}"
+    );
+}
+
+#[then("the client should complain about the length")]
+async fn then_complains_about_length(world: &mut AppWorld) {
+    let said = world.said();
+    assert!(
+        said.contains(&MAX_NAME_LEN.to_string()),
+        "expected the refusal to name the {MAX_NAME_LEN}-character limit, got:\n{said}"
+    );
+}
+
+#[tokio::main]
+async fn main() {
+    AppWorld::run("tests/features").await;
+}
+"##;
 
 fn gitignore() -> String {
     r#"/target
@@ -612,8 +2096,11 @@ fn env_example(cfg: &ProjectConfig) -> String {
     if let Some(url) = cfg.database.default_url() {
         out.push_str(&format!("DATABASE_URL={url}\n"));
     }
+    // Read by `logging::init`, which every generated binary that logs calls
+    // from `main`. An unparseable value falls back to `info` rather than
+    // leaving the process with no logs at all.
+    out.push_str("RUST_LOG=info\n");
     if matches!(cfg.kind, ProjectKind::WebApp | ProjectKind::ClientServer) {
-        out.push_str("RUST_LOG=info\n");
         out.push_str("BIND_ADDR=0.0.0.0:3000\n");
     }
     out
@@ -684,14 +2171,30 @@ docs:
 fn readme(cfg: &ProjectConfig) -> String {
     let mut layout = String::new();
     match cfg.kind {
-        ProjectKind::ClientTool => layout.push_str("- `src/` — CLI entrypoint\n"),
+        ProjectKind::ClientTool => {
+            layout.push_str("- `src/lib.rs` — the CLI's logic, and the unit tests for it\n");
+            layout.push_str("- `src/logging.rs` — the single logging entry point\n");
+            layout.push_str("- `src/main.rs` — collects the arguments, calls the library\n");
+        }
         ProjectKind::WebApp => {
-            layout.push_str("- `src/` — HTTP server entrypoint (axum)\n");
+            layout
+                .push_str("- `src/lib.rs` — the router and its handlers, with their unit tests\n");
+            layout.push_str("- `src/logging.rs` — the single logging entry point\n");
+            layout.push_str("- `src/main.rs` — reads the environment, binds, serves the router\n");
         }
         ProjectKind::ClientServer => {
-            layout.push_str("- `server/` — HTTP server (axum)\n");
-            layout.push_str("- `client/` — desktop GUI client\n");
+            layout.push_str(
+                "- `server/` — HTTP server (axum); logic in `src/lib.rs`, tests in `tests/`\n",
+            );
+            layout.push_str(
+                "- `client/` — desktop GUI client; logic in `src/lib.rs`, tests in `tests/`\n",
+            );
         }
+    }
+    if !matches!(cfg.kind, ProjectKind::ClientServer) {
+        layout.push_str(
+            "- `tests/` — integration tests (`smoke.rs`) and BDD (`features/`, `bdd.rs`)\n",
+        );
     }
     if cfg.frontend.is_some() {
         layout.push_str("- `frontend/` — JS/TS frontend\n");
@@ -728,16 +2231,23 @@ make docs     # serve the docsify docs on http://localhost:3000
 
 ## Testing
 
-This project ships with two test layers:
+This project ships with two test layers, both passing and both above the coverage floor
+before you write a line:
 
-- **Unit / integration tests** — standard `#[test]` functions in `src/` and
-  `tests/`.
+- **Unit / integration tests** — `#[test]` functions in `src/` (`mod tests`) and in
+  `tests/smoke.rs`.
 - **BDD scenarios** — Gherkin `.feature` files in `tests/features/`,
   executed by [cucumber-rs](https://crates.io/crates/cucumber). Step
   definitions live in `tests/bdd.rs`.
 
 Add a new scenario by dropping a `.feature` file under `tests/features/`
 and wiring matching `#[given]/#[when]/#[then]` steps into `tests/bdd.rs`.
+
+**Write the code in `src/lib.rs`, not in `src/main.rs`.** Nothing in a binary target can be
+called from a unit test or from a cucumber step, so a function defined in `main` can never be
+covered — it can only count against the gate. `main.rs` collects input and calls the library;
+that is its whole job. The same applies to a UI callback or an HTTP handler: keep the shell
+thin and put the decision in a helper the tests can call.
 
 Coverage is gated twice by `make coverage`: **85%** of lines overall, and **95%** on every path
 listed in [`.security-sensitive`](.security-sensitive) — see [AGENTS.md](AGENTS.md) §4.3.
@@ -793,7 +2303,11 @@ should follow the conventions below in addition to the upstream
 
 1. **Prefer composition over inheritance** — use traits and generics; avoid
    deep type hierarchies.
-2. **Keep `main.rs` thin** — wire dependencies and delegate to library code.
+2. **Keep `main.rs` thin** — collect the input, call `src/lib.rs`, print the
+   result. Nothing in a binary target is reachable from a unit test or a
+   cucumber step, so logic left in `main` is logic no test can cover and the
+   §4.3 gate counts anyway. The same applies to UI callbacks and HTTP
+   handlers: the shell moves values, the helper decides.
 3. **One concern per module.** Domain logic and I/O do not mix.
 4. **No silent breaking changes.** Bump versions, mark deprecations.
 5. **Document every public item** with `///` doc comments.
@@ -836,6 +2350,20 @@ Two layers ship by default and **both** are mandatory — unit/integration tests
 plus BDD scenarios, with line coverage held above 85% overall and above 95% on
 security-sensitive files. The policy is in §4
 below; this section is the mechanical walkthrough.
+
+Both layers ship **passing**, above the floor, on a freshly generated project.
+Keep them that way: the gate is a floor you stay above, not a milestone you
+reach later.
+
+### Where the code goes
+
+`src/lib.rs` — not `src/main.rs`. A binary target is not linked by
+`tests/*.rs` and not reachable from a cucumber step, so anything defined in
+`main` cannot be exercised by either mandatory layer while still counting
+against the §4.3 line-coverage floor. `main.rs` collects the input and calls
+into the library; that is all it ever does. The same reasoning applies inside
+the library: an HTTP handler or a UI callback moves values, and the decision it
+would otherwise make belongs in a helper the tests can call directly.
 
 ### Writing a BDD scenario
 
@@ -957,6 +2485,12 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 ### Added
 
 - Project bootstrapped by `ironroot` ({kind}).
+- Library target `src/lib.rs` holding the logic, with `src/main.rs` reduced to
+  collecting input and calling into it — the split both mandatory test layers
+  need, since nothing in a binary target is reachable from `tests/*.rs` or from
+  a cucumber step (AGENTS.md §4).
+- Unit tests, integration tests in `tests/smoke.rs`, and Gherkin scenarios in
+  `tests/features/` driving that library. `make coverage` passes as generated.
 "#,
         name = cfg.name,
         kind = cfg.kind.label(),
@@ -1411,18 +2945,33 @@ to `docs/_sidebar.md` so they show up in the navigation.
 fn docs_architecture(cfg: &ProjectConfig) -> String {
     let mut layout = String::new();
     match cfg.kind {
-        ProjectKind::ClientTool => layout.push_str("- `src/` — CLI entrypoint\n"),
-        ProjectKind::WebApp => layout.push_str("- `src/` — HTTP server entrypoint (axum)\n"),
+        ProjectKind::ClientTool => {
+            layout.push_str("- `src/lib.rs` — the CLI's logic, with its unit tests\n");
+            layout.push_str("- `src/logging.rs` — the single logging entry point\n");
+            layout.push_str("- `src/main.rs` — collects the arguments, calls the library\n");
+        }
+        ProjectKind::WebApp => {
+            layout
+                .push_str("- `src/lib.rs` — the router and its handlers, with their unit tests\n");
+            layout.push_str("- `src/logging.rs` — the single logging entry point\n");
+            layout.push_str("- `src/main.rs` — reads the environment, binds, serves the router\n");
+        }
         ProjectKind::ClientServer => {
-            layout.push_str("- `server/` — HTTP server (axum)\n");
-            layout.push_str("- `client/` — desktop GUI client\n");
+            layout.push_str(
+                "- `server/` — HTTP server (axum); logic in `src/lib.rs`, tests in `tests/`\n",
+            );
+            layout.push_str(
+                "- `client/` — desktop GUI client; logic in `src/lib.rs`, tests in `tests/`\n",
+            );
         }
     }
     if cfg.frontend.is_some() {
         layout.push_str("- `frontend/` — JS/TS frontend\n");
     }
     layout.push_str("- `docs/` — this documentation site (docsify)\n");
-    layout.push_str("- `tests/` — integration + BDD (`features/`, `bdd.rs`)\n");
+    if !matches!(cfg.kind, ProjectKind::ClientServer) {
+        layout.push_str("- `tests/` — integration (`smoke.rs`) + BDD (`features/`, `bdd.rs`)\n");
+    }
 
     format!(
         r#"# Architecture
@@ -1436,9 +2985,14 @@ unit tests and BDD scenarios.
 {layout}
 ## Principles
 
-1. **Keep entrypoints thin** — wire dependencies and delegate to library code.
+1. **Keep entrypoints thin** — `main.rs` collects the input and calls the
+   library. It is not a style preference: a binary target is not linked by
+   `tests/*.rs` and is unreachable from a cucumber step, so code that lives in
+   `main` cannot be covered by either of the two mandatory test layers while
+   still counting against the 85% floor in [AGENTS.md](../AGENTS.md) §4.3.
 2. **One concern per module.** Domain logic and I/O do not mix.
-3. **Pure first, side-effects at the edges** — keep helpers testable.
+3. **Pure first, side-effects at the edges** — keep helpers testable. Handlers
+   and UI callbacks move values; the helper they call makes the decision.
 
 See [AGENTS.md](../AGENTS.md) for the full set of house rules.
 "#,
@@ -1460,10 +3014,11 @@ lands the work, and record the result in [CHANGELOG.md](../CHANGELOG.md).
 ## Phase 1 — Foundations
 
 - [x] Project bootstrapped by `ironroot`
-- [ ] Replace the placeholder entrypoint with the real one
-- [ ] First business-logic helper module under `src/`, with unit tests
+- [x] `make test` and `make coverage` green as generated — 85% of lines overall
+- [ ] Replace the placeholder logic in `src/lib.rs` with the real thing
+- [ ] First business-logic helper module of your own under `src/`, with unit tests
 - [ ] First BDD scenario covering it (`tests/features/`)
-- [ ] `make coverage` green: 85% of lines overall, 95% on security-sensitive paths
+- [ ] `make coverage` still green after it: 85% overall, 95% on security-sensitive paths
 - [ ] `make audit` wired into CI
 
 ## Phase 2 — Security baseline
