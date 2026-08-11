@@ -15,7 +15,7 @@
 //!
 //! `src/main.rs` does one thing — collect the arguments and hand them to
 //! [`render`]. Keep it that way. Code that lives in `main` cannot be called from
-//! either layer, so it counts against the 80% line coverage gate in §4.3 without
+//! either layer, so it counts against the 85% line coverage gate in §4.3 without
 //! any way to cover it. It is also why [`render`] takes its arguments as a
 //! parameter instead of reading [`std::env::args`] itself: a helper that reaches
 //! for process state cannot be driven from a scenario.

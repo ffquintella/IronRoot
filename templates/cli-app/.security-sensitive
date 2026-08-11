@@ -1,0 +1,30 @@
+# Security-sensitive paths — the 95% line-coverage floor applies to every file listed here.
+# See AGENTS.md §4.3 and .claude/skills/secure-development/SKILL.md §9.
+#
+# One `fnmatch` pattern per line, relative to this directory, `#` starts a comment.
+# `*` crosses directory separators, so `*src/auth*` covers `src/auth.rs`, `src/auth/token.rs`,
+# and `server/src/auth.rs` in a workspace.
+# Checked by `./scripts/coverage-gate.py`.
+#
+# A file belongs here when it implements or enforces a security control:
+# authentication, authorization, session or token handling, password hashing, crypto,
+# input validation, output escaping, query construction, secret loading, lockout, rate
+# limiting, or the audit trail.
+#
+# Add the path in the same commit that creates the file. An undeclared security module is
+# an unenforced 95% — which is the whole failure mode this manifest exists to prevent.
+# Reviewers check this file against the diff.
+#
+# The patterns below are the conventional names, active and matching nothing yet. Keep them,
+# add yours, and delete a line only when the concept genuinely does not exist here.
+
+*src/auth*
+*src/authz*
+*src/security*
+*src/crypto*
+*src/session*
+*src/token*
+*src/password*
+*src/permission*
+*src/audit*
+*src/validation*

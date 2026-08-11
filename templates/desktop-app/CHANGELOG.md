@@ -12,11 +12,32 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 
 ### Added
 
+- A `secure-development` skill now ships with the template, at
+  `.claude/skills/secure-development/SKILL.md`. Claude Code loads it automatically in this
+  template and in any project started from it, and it carries [AGENTS.md](AGENTS.md) §5–§6 in
+  working form: what counts as untrusted input, parameterized queries and allow-lists for the
+  parts that cannot bind, the single authentication and authorization entry point, progressive
+  lockout with identical responses for unknown-user and wrong-password, secret and password
+  handling, error handling that leaks nothing to the caller, the INSERT-only audit trail on a
+  separate instance, dependency hygiene — each with the Rust pattern that satisfies it, and the
+  checklist to run before calling a change done.
+- `scripts/coverage-gate.py` enforces both coverage floors in one command: **85%** of lines
+  overall and **95%** on every path declared in the new `.security-sensitive` manifest. It prints
+  a per-file table, names the files that miss a floor, and exits 1 — or 2 when the gate itself
+  cannot run, such as a missing `cargo-llvm-cov` or an unreadable report. `--json PATH` re-checks
+  an existing `cargo llvm-cov` export without re-running the suite. The script exists because
+  `cargo llvm-cov --fail-under-lines` enforces one project-wide number and cannot express a
+  per-file floor; nothing in the build depends on it.
+- `.security-sensitive` declares which paths the 95% floor applies to — one `fnmatch` pattern per
+  line, shipped with the conventional module names (`src/auth*`, `src/crypto*`, `src/session*`,
+  `src/token*`, `src/audit*`, …), none of which match a file yet. Add a path there in the same
+  commit that creates a file implementing or enforcing a security control: an undeclared security
+  module is an unenforced 95%, so reviewers check the manifest against the diff.
 - The template now passes its own coverage gate as shipped. A new library target, `src/lib.rs`,
   exposes `banner() -> String` (the text the binary prints) and unit-tests it in `mod tests`;
   `tests/features/banner.feature` and `tests/bdd.rs` add the cucumber layer that
   [AGENTS.md](AGENTS.md) §4.2 requires. `cargo llvm-cov --all-features --workspace
-  --fail-under-lines 80` reports 93.75% line coverage instead of exiting 1 on 0.00%, so a fresh
+  --fail-under-lines 85` reports 93.75% line coverage instead of exiting 1 on 0.00%, so a fresh
   copy of the template satisfies the §7 checklist before you write a line of your own code.
   The scenarios run without a window, a display server, or an event loop — the working example
   of the AGENTS.md rule that UI callbacks stay thin and logic lives in `src/`.
@@ -28,10 +49,18 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 
 ### Changed
 
+- The line-coverage floor is **85%**, up from 80%, and security-sensitive files carry a separate
+  **95%** floor under which every error branch must be covered — the rejected input, the denied
+  caller, the expired token, the triggered lockout, the failed audit write. [AGENTS.md](AGENTS.md)
+  §4.3 is rewritten around the two floors and the §7 checklist now runs
+  `./scripts/coverage-gate.py` instead of a bare `cargo llvm-cov --fail-under-lines 80`;
+  `README.md` and `CLAUDE.md` follow, and both point at the new `secure-development` skill. As
+  shipped the template reports 93.75% overall and declares no security-sensitive file yet, so
+  a fresh copy passes both gates before you write a line of your own code.
 - `src/main.rs` is a one-line call to `ironroot_desktop_app::banner()`. The printed output is
   byte-for-byte what it was; the text moved to the library target so both test layers can reach
   it. Add new logic to `src/lib.rs`, not to `main` — code that only runs from `main` cannot be
-  called from a unit test or a scenario, and counts against the 80% gate with no way to cover it.
+  called from a unit test or a scenario, and counts against the 85% gate with no way to cover it.
 
 ### Deprecated
 

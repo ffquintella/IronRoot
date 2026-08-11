@@ -24,7 +24,7 @@
 //! AGENTS.md states for UI callbacks: keep the shell thin and the logic in
 //! `src/`, so it can be unit- and BDD-tested without opening a window. Code that
 //! only runs from `main` — or only from an event handler — counts against the
-//! 80% line coverage gate in §4.3 with no way to cover it.
+//! 85% line coverage gate in §4.3 with no way to cover it.
 //!
 //! ## Running
 //!

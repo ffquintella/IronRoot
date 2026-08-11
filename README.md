@@ -56,7 +56,10 @@ ironroot/
 │   ├── web/                # Web layer abstractions (future)
 │   ├── cli/                # CLI abstraction layer
 │   └── gui/                # Desktop UI placeholder (Tauri/egui)
-└── templates/
+└── templates/              # Each template also ships:
+    │                       #   .claude/skills/secure-development/ — secure-dev skill
+    │                       #   .security-sensitive                — 95%-coverage paths
+    │                       #   scripts/coverage-gate.py           — 85% / 95% gates
     ├── web-app/            # Standalone web application template
     ├── cli-app/            # Standalone CLI application template
     └── desktop-app/        # Standalone desktop application template
@@ -89,7 +92,11 @@ cargo run -p ironroot
 the GUI toolkit (Tauri or egui — only for client/server), the frontend
 framework (React or Angular — only when a web UI is involved), and the
 database, then writes out a ready-to-build project with `Cargo.toml`,
-`Makefile`, basic tests, and an `AGENTS.md`.
+`Makefile`, basic tests, an `AGENTS.md`, and the same secure-development
+package the templates carry: a `secure-development` Claude skill under
+`.claude/skills/`, a `.security-sensitive` manifest, and
+`scripts/coverage-gate.py` enforcing 85% line coverage overall and 95% on
+security-sensitive paths (`make coverage`).
 
 ### Use a template
 
@@ -98,7 +105,14 @@ database, then writes out a ready-to-build project with `Cargo.toml`,
 cp -r templates/cli-app my-cli-app
 cd my-cli-app
 cargo build && cargo run
+./scripts/coverage-gate.py   # 85% overall, 95% on security-sensitive paths
 ```
+
+Every template ships a `secure-development` Claude skill at
+`.claude/skills/secure-development/SKILL.md` — Claude Code loads it automatically inside the copied
+project. It carries the template's own `AGENTS.md` §5–§6 in working form (untrusted input,
+parameterized queries, one authentication entry point, secrets, error handling, the audit trail,
+dependency hygiene) plus the two coverage floors and the pre-merge checklist.
 
 ---
 

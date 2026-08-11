@@ -14,7 +14,7 @@
 //!   `tests/bdd.rs` (§4.2).
 //!
 //! `src/main.rs` is a one-liner, and should stay one. Code that lives in `main`
-//! cannot be called from either layer, so it counts against the 80% line
+//! cannot be called from either layer, so it counts against the 85% line
 //! coverage gate in §4.3 without any way to cover it.
 //!
 //! ## Running
