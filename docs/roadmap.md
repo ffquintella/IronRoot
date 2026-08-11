@@ -35,6 +35,7 @@
 - [x] Make all three templates pass their own AGENTS.md §4 gate as shipped (unit + BDD layers, coverage above 80%)
 - [x] Ship a `secure-development` Claude skill with every template and with `ironroot new`
 - [x] Raise the template coverage floor to 85% of lines, with 95% on paths declared in `.security-sensitive`, enforced by `scripts/coverage-gate.py`
+- [x] Make `ironroot new` projects pass their own coverage gate as generated — `src/lib.rs` holds the logic, `src/main.rs` only calls in, and the unit, integration and BDD layers all drive that library
 - [ ] Implement real routing in `web-app` template (using `ironroot-web`)
 - [ ] Implement command dispatch in `cli-app` template (using `ironroot-cli`)
 - [ ] Integrate egui or Tauri into `desktop-app` template (using `ironroot-gui`)
