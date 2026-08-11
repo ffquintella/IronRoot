@@ -107,7 +107,7 @@ Rules:
 
 ---
 
-## 4. Tests: unit *and* behaviour, coverage above 80%
+## 4. Tests: unit *and* behaviour, coverage above 85%
 
 Two layers are required. A feature is not done with only one of them.
 
@@ -143,21 +143,38 @@ Two layers are required. A feature is not done with only one of them.
 If you cannot exercise a helper from a BDD scenario without starting a server or a database,
 the helper is doing too much — split it.
 
-### 4.3 Coverage gate: 80% minimum
+### 4.3 Coverage gates: 85% overall, 95% security-sensitive
+
+Two floors. Both are gates, not targets, and both are enforced by one command.
+
+| Scope | Floor |
+|---|---|
+| Every line of the project | **85%** |
+| Every file listed in [`.security-sensitive`](.security-sensitive) | **95%** |
 
 ```bash
-cargo install cargo-llvm-cov          # once
-cargo llvm-cov --all-features --workspace --fail-under-lines 80
-cargo llvm-cov --all-features --workspace --html   # browse uncovered lines
+cargo install cargo-llvm-cov                                     # once
+./scripts/coverage-gate.py                                       # both floors
+cargo llvm-cov --all-features --workspace --fail-under-lines 85  # the overall floor alone
+cargo llvm-cov --all-features --workspace --html                 # browse uncovered lines
 ```
 
-- **Line coverage must stay above 80%.** A change that pushes it below the threshold is not
-  mergeable; add the missing tests instead of lowering the gate.
-- Coverage never goes **down** in a pull request, even while above 80%.
+- **Line coverage must stay above 85% overall.** A change that pushes it below the threshold is
+  not mergeable; add the missing tests instead of lowering the gate.
+- **Security-sensitive code must stay above 95%**, and every one of its error branches must be
+  covered: the rejected input, the denied caller, the expired token, the triggered lockout, the
+  failed audit write. A security control whose negative case is untested is not tested.
+- A file is security-sensitive when it implements or enforces a control from §5 or §6 —
+  authentication, authorization, session or token handling, password hashing, crypto, input
+  validation, output escaping, query construction, secret loading, lockout, rate limiting, or the
+  audit trail. **Declare it in `.security-sensitive` in the same commit that creates it.** An
+  undeclared security module is an unenforced 95%, which is the failure mode the manifest exists
+  to prevent; reviewers check it against the diff.
+- Coverage never goes **down** in a pull request, even while above a floor.
 - Do not chase the number with assertion-free tests. An uncovered error branch means a missing
   test; a test that executes code without asserting on it is worse than no test.
 - `#[cfg(not(tarpaulin_include))]`-style exclusions and `#[coverage(off)]` need a comment
-  justifying why the code is untestable.
+  justifying why the code is untestable. They are never how a file reaches 95%.
 
 Run before every push:
 
@@ -165,7 +182,7 @@ Run before every push:
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo llvm-cov --all-features --workspace --fail-under-lines 80
+./scripts/coverage-gate.py
 ```
 
 ---
@@ -173,6 +190,12 @@ cargo llvm-cov --all-features --workspace --fail-under-lines 80
 ## 5. Secure development practices
 
 These are requirements, not suggestions. Reviewers reject changes that violate them.
+
+The [`secure-development` skill](.claude/skills/secure-development/SKILL.md) is the working form
+of this section and §6: the same rules, with the Rust patterns that satisfy them and the review
+checklist to run before calling a change done. Claude Code loads it automatically; other
+assistants should be pointed at it. Keep the two in step — where they disagree, this file wins
+and the disagreement is a bug to fix in the same pull request.
 
 ### 5.1 Authentication and authorization
 
@@ -314,7 +337,10 @@ A change is complete only when **all** of these hold:
 - [ ] The version bump matches the semver rules in §2 (or the change is unreleased).
 - [ ] Unit/integration tests cover the happy path, the error branches, and the boundaries.
 - [ ] At least one BDD scenario covers the behaviour, including its negative case.
-- [ ] `cargo llvm-cov --all-features --workspace --fail-under-lines 80` passes and coverage did not drop.
+- [ ] `./scripts/coverage-gate.py` passes — 85% of lines overall, 95% on every security-sensitive
+      file — and coverage did not drop.
+- [ ] Every new file that implements or enforces a security control is listed in
+      [`.security-sensitive`](.security-sensitive).
 - [ ] `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` pass.
 - [ ] `cargo audit` and `cargo deny check` are clean.
 - [ ] Every security-relevant action the change introduces is audited (§6.1) and logged (§6.2).
@@ -329,6 +355,9 @@ A change is complete only when **all** of these hold:
 - [`ai/AGENTS.md`](../../ai/AGENTS.md) — framework-wide agent rules.
 - [`ai/INSTRUCTIONS.md`](../../ai/INSTRUCTIONS.md) — naming, layout, and extension conventions.
 - [`docs/architecture.md`](../../docs/architecture.md) — layered architecture.
+- [`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) —
+  §5 and §6 in working form, for you and for any AI assistant.
+- [`.security-sensitive`](.security-sensitive) — which paths the 95% coverage floor applies to.
 
 If a rule here conflicts with your organisation's own security standard, the organisation's
 standard wins — and the conflict belongs in a pull request against this file.

@@ -18,6 +18,7 @@ pub fn generate(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(root, "rust-toolchain.toml", RUST_TOOLCHAIN)?;
     write(root, ".env.example", &env_example(cfg))?;
     scaffold_docs(cfg, root)?;
+    scaffold_secure_development(root)?;
 
     match cfg.kind {
         ProjectKind::ClientTool => scaffold_cli(cfg, root)?,
@@ -116,6 +117,27 @@ fn scaffold_docs(cfg: &ProjectConfig, root: &Path) -> io::Result<()> {
     write(&docs, "roadmap.md", &docs_roadmap(cfg))?;
     write_exec(&docs, "serve-docs.sh", DOCS_SERVE_SH)?;
     write(&docs, "serve-docs.bat", DOCS_SERVE_BAT)?;
+    Ok(())
+}
+
+/// Ship the secure-development rules and the coverage gates that back them:
+///
+/// - `.claude/skills/secure-development/SKILL.md` — `AGENTS.md` §5–§6 in the form an AI
+///   assistant loads on its own. Claude Code discovers it automatically from the project root.
+/// - `.security-sensitive` — the paths the 95% coverage floor applies to.
+/// - `scripts/coverage-gate.py` — enforces 85% overall and 95% on those paths. It is a script
+///   rather than a `cargo llvm-cov --fail-under-lines` flag because that flag can only express
+///   one project-wide number.
+fn scaffold_secure_development(root: &Path) -> io::Result<()> {
+    let skill = root.join(".claude/skills/secure-development");
+    fs::create_dir_all(&skill)?;
+    write(&skill, "SKILL.md", SECURE_DEVELOPMENT_SKILL)?;
+
+    write(root, ".security-sensitive", SECURITY_SENSITIVE)?;
+
+    let scripts = root.join("scripts");
+    fs::create_dir_all(&scripts)?;
+    write_exec(&scripts, "coverage-gate.py", COVERAGE_GATE_PY)?;
     Ok(())
 }
 
@@ -627,10 +649,10 @@ test:
 bdd:
 	cargo test --workspace --test bdd
 
-# Line coverage must stay above 80% — see AGENTS.md §4.3.
-# Requires: cargo install cargo-llvm-cov
+# Both coverage floors from AGENTS.md §4.3: 85% of lines overall, and 95% on every
+# path listed in `.security-sensitive`. Requires: cargo install cargo-llvm-cov
 coverage:
-	cargo llvm-cov --all-features --workspace --fail-under-lines 80
+	./scripts/coverage-gate.py
 
 # Supply-chain audit. Requires: cargo install cargo-audit cargo-deny
 audit:
@@ -675,6 +697,9 @@ fn readme(cfg: &ProjectConfig) -> String {
         layout.push_str("- `frontend/` — JS/TS frontend\n");
     }
     layout.push_str("- `docs/` — docsify documentation site (`make docs`)\n");
+    layout.push_str("- `scripts/coverage-gate.py` — the 85% / 95% coverage gates\n");
+    layout.push_str("- `.security-sensitive` — paths the 95% coverage floor applies to\n");
+    layout.push_str("- `.claude/skills/` — the secure-development skill, loaded automatically\n");
 
     format!(
         r#"# {name}
@@ -695,7 +720,7 @@ Bootstrapped by **ironroot**.
 make build
 make test     # unit + integration + BDD
 make bdd      # just the Gherkin scenarios
-make coverage # line coverage, gated at 80%
+make coverage # coverage gates: 85% of lines overall, 95% security-sensitive
 make audit    # cargo audit + cargo deny check
 make run
 make docs     # serve the docsify docs on http://localhost:3000
@@ -714,14 +739,25 @@ This project ships with two test layers:
 Add a new scenario by dropping a `.feature` file under `tests/features/`
 and wiring matching `#[given]/#[when]/#[then]` steps into `tests/bdd.rs`.
 
-Line coverage is gated at 80% (`make coverage`) — see [AGENTS.md](AGENTS.md) §4.
+Coverage is gated twice by `make coverage`: **85%** of lines overall, and **95%** on every path
+listed in [`.security-sensitive`](.security-sensitive) — see [AGENTS.md](AGENTS.md) §4.3.
+
+## Secure development
+
+[`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) ships
+with this project. Claude Code loads it automatically; point other assistants at it. It carries
+[AGENTS.md](AGENTS.md) §5–§6 in working form — untrusted input, parameterized queries, one
+authentication entry point, secrets, error handling, the audit trail, dependency hygiene — each
+with the Rust pattern that satisfies it, and the checklist to run before calling a change done.
 
 ## House rules
 
 [AGENTS.md](AGENTS.md) is the single source of truth for how work is done here:
 roadmap-driven planning, semantic versioning, changelog upkeep, unit **and** behaviour tests
-above 80% coverage, secure-coding requirements, and full audit coverage.
-[CLAUDE.md](CLAUDE.md) points Claude Code at the same file.
+above 85% coverage — 95% on security-sensitive paths — secure-coding requirements, and full
+audit coverage. [CLAUDE.md](CLAUDE.md) points Claude Code at the same file, and the
+[`secure-development` skill](.claude/skills/secure-development/SKILL.md) carries §5–§6 in the form
+an AI assistant loads on its own.
 
 Record every user-visible change in [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]`, in
 the same commit that makes the change. Plan it in [docs/roadmap.md](docs/roadmap.md) first.
@@ -797,7 +833,8 @@ without spinning up a server or a database, the helper is doing too much.
 ## Testing
 
 Two layers ship by default and **both** are mandatory — unit/integration tests
-plus BDD scenarios, with line coverage held above 80%. The policy is in §4
+plus BDD scenarios, with line coverage held above 85% overall and above 95% on
+security-sensitive files. The policy is in §4
 below; this section is the mechanical walkthrough.
 
 ### Writing a BDD scenario
@@ -826,7 +863,7 @@ below; this section is the mechanical walkthrough.
 - `make lint`     — run clippy with `-D warnings`.
 - `make test`     — run the full test suite (unit + integration + BDD).
 - `make bdd`      — run only the Cucumber/Gherkin scenarios.
-- `make coverage` — line coverage, gated at 80%.
+- `make coverage` — both coverage floors: 85% overall, 95% security-sensitive.
 - `make audit`    — `cargo audit` + `cargo deny check`.
 - Update this file whenever a new convention is agreed.
 {rules}"#,
@@ -855,6 +892,11 @@ automatically — it deliberately duplicates nothing.
 
 > @AGENTS.md
 
+The secure-development rules in AGENTS.md §5–§6 also ship as a skill you load automatically:
+[`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md). Use it
+whenever a change touches authentication, authorization, secrets, queries, untrusted input, error
+handling, logging, the audit trail, or a dependency — and before calling any change done.
+
 ## Quick reminders (the full rules are in AGENTS.md)
 
 | Topic | Rule | Section |
@@ -863,7 +905,7 @@ automatically — it deliberately duplicates nothing.
 | Versioning | Semantic Versioning; no silent breaking changes; tag every release | §2 |
 | Changelog | Update [`CHANGELOG.md`](CHANGELOG.md) under `## [Unreleased]` in the same commit | §3 |
 | Tests | Unit/integration **and** BDD scenarios — both, every feature | §4 |
-| Coverage | `make coverage` must pass at 80% lines, and coverage must not drop | §4.3 |
+| Coverage | `make coverage` must pass — **85%** of lines overall, **95%** on every file in [`.security-sensitive`](.security-sensitive) — and coverage must not drop | §4.3 |
 | Secure code | Parameterized queries, output escaping, bounded input, handled errors, no secrets in the repo, no `unsafe` | §5 |
 | Audit | Every security-relevant action audited to an INSERT-only store on a separate instance; `make audit` clean | §6 |
 | Done | Work through the checklist before saying a change is finished | §7 |
@@ -922,7 +964,7 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 }
 
 /// The project-independent half of `AGENTS.md`: roadmap discipline, semver,
-/// changelog upkeep, the two test layers and the 80% coverage gate, secure
+/// changelog upkeep, the two test layers and the 85%/95% coverage gates, secure
 /// coding requirements, and audit coverage. Kept as a plain `const` (rather
 /// than folded into the `format!` above) so its many `{}`-free code samples
 /// need no brace escaping.
@@ -992,7 +1034,7 @@ user-visible change updates it — in the same commit, not afterwards.
 
 ---
 
-## 4. Tests: unit *and* behaviour, coverage above 80%
+## 4. Tests: unit *and* behaviour, coverage above 85%
 
 Two layers are required. A feature is not done with only one of them.
 
@@ -1015,26 +1057,49 @@ Two layers are required. A feature is not done with only one of them.
   denied, input rejected, lockout triggered.
 - Keep steps thin: parse arguments, call one helper from `src/`, assert.
 
-### 4.3 Coverage gate: 80% minimum
+### 4.3 Coverage gates: 85% overall, 95% security-sensitive
+
+Two floors. Both are gates, not targets, and `make coverage` enforces both.
+
+| Scope | Floor |
+|---|---|
+| Every line of the project | **85%** |
+| Every file listed in [`.security-sensitive`](.security-sensitive) | **95%** |
 
 ```bash
-cargo install cargo-llvm-cov          # once
-make coverage                         # fails under 80% line coverage
+cargo install cargo-llvm-cov                       # once
+make coverage                                      # both floors (scripts/coverage-gate.py)
 cargo llvm-cov --all-features --workspace --html   # browse uncovered lines
 ```
 
-- **Line coverage must stay above 80%.** A change that pushes it below the threshold is not
-  mergeable; add the missing tests instead of lowering the gate.
-- Coverage never goes **down** in a pull request, even while above 80%.
+- **Line coverage must stay above 85% overall.** A change that pushes it below the threshold is
+  not mergeable; add the missing tests instead of lowering the gate.
+- **Security-sensitive code must stay above 95%**, and every one of its error branches must be
+  covered: the rejected input, the denied caller, the expired token, the triggered lockout, the
+  failed audit write. A security control whose negative case is untested is not tested.
+- A file is security-sensitive when it implements or enforces a control from section 5 or 6 —
+  authentication, authorization, session or token handling, password hashing, crypto, input
+  validation, output escaping, query construction, secret loading, lockout, rate limiting, or the
+  audit trail. **Declare it in `.security-sensitive` in the same commit that creates it.** An
+  undeclared security module is an unenforced 95%, which is the failure mode the manifest exists
+  to prevent; reviewers check it against the diff.
+- Coverage never goes **down** in a pull request, even while above a floor.
 - Do not chase the number with assertion-free tests. An uncovered error branch means a missing
   test; a test that executes code without asserting on it is worse than no test.
-- Any coverage exclusion needs a comment justifying why the code is untestable.
+- Any coverage exclusion needs a comment justifying why the code is untestable. An exclusion is
+  never how a file reaches 95%.
 
 ---
 
 ## 5. Secure development practices
 
 These are requirements, not suggestions. Reviewers reject changes that violate them.
+
+The [`secure-development` skill](.claude/skills/secure-development/SKILL.md) is the working form
+of this section and section 6: the same rules, with the Rust patterns that satisfy them and the
+review checklist to run before calling a change done. Claude Code loads it automatically; other
+assistants should be pointed at it. Keep the two in step — where they disagree, this file wins
+and the disagreement is a bug to fix in the same pull request.
 
 ### 5.1 Authentication and authorization
 
@@ -1167,7 +1232,10 @@ A change is complete only when **all** of these hold:
 - [ ] The version bump matches the semver rules in section 2 (or the change is unreleased).
 - [ ] Unit/integration tests cover the happy path, the error branches, and the boundaries.
 - [ ] At least one BDD scenario covers the behaviour, including its negative case.
-- [ ] `make coverage` passes at 80% lines and coverage did not drop.
+- [ ] `make coverage` passes — 85% of lines overall, 95% on every security-sensitive file — and
+      coverage did not drop.
+- [ ] Every new file that implements or enforces a security control is listed in
+      [`.security-sensitive`](.security-sensitive).
 - [ ] `make fmt`, `make lint`, and `make test` pass.
 - [ ] `make audit` is clean.
 - [ ] Every security-relevant action the change introduces is audited (6.1) and logged (6.2).
@@ -1180,6 +1248,9 @@ A change is complete only when **all** of these hold:
 
 - [`docs/roadmap.md`](docs/roadmap.md) — what to build, and in what order.
 - [`docs/architecture.md`](docs/architecture.md) — how this project is laid out.
+- [`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) —
+  sections 5 and 6 in working form, for you and for any AI assistant.
+- [`.security-sensitive`](.security-sensitive) — which paths the 95% coverage floor applies to.
 - [IronRoot AGENTS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/AGENTS.md) — framework-wide agent rules.
 - [IronRoot INSTRUCTIONS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/INSTRUCTIONS.md) — naming, layout, and extension conventions.
 
@@ -1392,7 +1463,7 @@ lands the work, and record the result in [CHANGELOG.md](../CHANGELOG.md).
 - [ ] Replace the placeholder entrypoint with the real one
 - [ ] First business-logic helper module under `src/`, with unit tests
 - [ ] First BDD scenario covering it (`tests/features/`)
-- [ ] `make coverage` green at 80% lines
+- [ ] `make coverage` green: 85% of lines overall, 95% on security-sensitive paths
 - [ ] `make audit` wired into CI
 
 ## Phase 2 — Security baseline
@@ -1404,6 +1475,7 @@ lands the work, and record the result in [CHANGELOG.md](../CHANGELOG.md).
 - [ ] Central logging library configured with the house format
 - [ ] Audit trail on a separate, INSERT-only instance
 - [ ] Audit mechanism documented under `docs/`
+- [ ] Every security module declared in `.security-sensitive` and covered above 95%
 
 ## Phase 3 — Features
 
@@ -1533,6 +1605,531 @@ echo ERROR: no server available.
 echo Install either docsify-cli (npm i -g docsify-cli) or Python 3.
 exit /b 1
 "#;
+
+// --- secure-development blobs ---------------------------------------------
+
+/// `.claude/skills/secure-development/SKILL.md`. A Claude Code skill carrying the secure
+/// development rules from `AGENTS.md` §5–§6 in the form an assistant loads on its own: what
+/// counts as untrusted input, parameterized queries, the single authentication entry point,
+/// secret handling, error handling, the audit trail, dependency hygiene, the two coverage
+/// floors, and the checklist to run before calling a change done. Kept byte-identical to the
+/// copy in `templates/*/.claude/skills/` — change both or neither.
+const SECURE_DEVELOPMENT_SKILL: &str = r##"---
+name: secure-development
+description: The binding secure-development rules for this project. Use when writing, reviewing, or designing any code that touches authentication, authorization, passwords, hashing, tokens, sessions, crypto, secrets or configuration, SQL and other queries, user input, request bodies, file uploads, HTTP handlers, CLI arguments, IPC commands, UI callbacks, error handling, logging, or the audit trail — and when adding a dependency, reviewing a diff, writing tests for security-sensitive code, or checking whether a change is done. Enforces the 85% overall / 95% security-sensitive line-coverage floors.
+---
+
+# Secure development
+
+The rules below are the project's own, not general advice. They restate
+[`AGENTS.md`](../../../AGENTS.md) §4–§7 in the form you need while writing code. Where this file
+and `AGENTS.md` disagree, `AGENTS.md` wins and the disagreement is a bug — fix it in the same
+pull request.
+
+**A change that violates one of these is rejected, not negotiated.** If a rule genuinely cannot
+be met, say so explicitly in the pull request with the reason — never skip it silently and never
+weaken the gate instead of the code.
+
+## Non-negotiables at a glance
+
+| # | Rule |
+|---|---|
+| 1 | One authentication/authorization entry point. Never re-check inline. |
+| 2 | Authorize by role/group, per application function. Never by hard-coded identity. |
+| 3 | No secret in the repository — code, config, tests, fixtures, or git history. |
+| 4 | Passwords are one-way hashes (Argon2id/scrypt). Never encrypted, never compared in SQL. |
+| 5 | Parameterized queries only. Allow-lists where a parameter cannot bind. |
+| 6 | Bound every input, server-side. Escape every output. |
+| 7 | Handle every error. No `unwrap`/`expect`/`panic!` on a request, command, or callback path. |
+| 8 | Every security-relevant action is audited (INSERT-only, separate store) and logged. |
+| 9 | `unsafe` is forbidden unless unavoidable, isolated, `// SAFETY:`-justified, and tested. |
+| 10 | 85% line coverage overall; **95% on every security-sensitive file**. |
+
+## 1. Treat these as untrusted input — always
+
+HTTP request bodies, query strings, path segments, headers, cookies, CLI arguments, environment
+variables, file paths, stdin, file uploads, IPC/command payloads, UI form fields, and anything
+read back from another service. Untrusted means: bound its size, validate its shape server-side,
+reject what you do not recognise, and never interpolate it into a query, a path, a shell command,
+or a rendered page.
+
+```rust
+// Bound the input before you parse it, not after.
+const MAX_NAME: usize = 64;
+
+pub fn parse_name(raw: &str) -> Result<Name, ValidationError> {
+    if raw.is_empty() || raw.chars().count() > MAX_NAME {
+        return Err(ValidationError::Length { max: MAX_NAME });
+    }
+    if !raw.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Err(ValidationError::Charset);
+    }
+    Ok(Name(raw.to_owned()))
+}
+```
+
+Client-side validation is a convenience, never a control. Re-validate on the server even when
+the UI already did.
+
+## 2. Queries
+
+Bind every value. Never build SQL by concatenation or `format!`, not even "just for the table
+name in an internal admin tool".
+
+```rust
+// Correct — the value is bound, never interpolated.
+let user = sqlx::query_as!(
+    User,
+    "SELECT id, email, role FROM users WHERE email = $1",
+    email.as_str(),
+)
+.fetch_optional(&pool)
+.await?;
+```
+
+Where a parameter cannot bind — table name, column name, sort direction — map the input through
+an allow-list with a safe default. Manual escaping is not an acceptable primary defence.
+
+```rust
+fn sort_column(requested: &str) -> &'static str {
+    match requested {
+        "email" => "email",
+        "created_at" => "created_at",
+        _ => "id", // safe default; unknown input is not an error path worth leaking
+    }
+}
+```
+
+## 3. Authentication and authorization
+
+- **One** entry point for the whole application. A handler, command, or UI callback asks it; it
+  never re-implements the check.
+- Authorize by **role/group**, with granularity per application function. Never by a hard-coded
+  user id, email, or username.
+- Require a **second factor** for sensitive operations: creating or changing credentials,
+  changing a password, changing configuration or permissions, exporting data, restoring a backup.
+- Apply **progressive lockout** on sign-in — e.g. 3 failures → 1 min, 5 → 15 min, 7 → 1 h — keyed
+  primarily on client IP, enforced **before** the password is checked, server-side.
+- Return an **identical** response for "unknown user" and "wrong password" — same body, same
+  status, and no timing tell (verify against a dummy hash when the user does not exist).
+
+```rust
+// Same work, same answer, whether or not the account exists.
+let stored = repo.password_hash(&email).await?;
+let hash = stored.as_deref().unwrap_or(DUMMY_ARGON2_HASH);
+let ok = verify_password(candidate, hash) && stored.is_some();
+if !ok {
+    audit.record(Event::LoginFailed { email: &email, ip }).await?;
+    return Err(AuthError::InvalidCredentials); // one variant for both cases
+}
+```
+
+## 4. Secrets and sensitive data
+
+- Secrets come from the environment or a secret manager. `.env` is git-ignored; only
+  `.env.example` with placeholder values is committed. **A secret that reaches a commit is
+  burned** — rotate it, do not just delete the line.
+- Passwords and anything that never needs recovering: one-way hash with a modern KDF (Argon2id,
+  scrypt). Never encrypt a password. Never compare one in SQL.
+- Data that must be reversible is decrypted in server memory only, for the shortest possible
+  time, and zeroized after use (`zeroize`).
+- TLS on every hop, internal ones included. No plaintext endpoint anywhere.
+- Production data never reaches development or staging without masking first.
+- **Never log or persist**: a password (even a wrong one), token, key, session cookie, full
+  document/ID number, or an unfiltered request body. Derive a `Debug` impl by hand for any type
+  holding one, or wrap it so the value cannot print.
+
+```rust
+pub struct Secret(String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(***)") // a `#[derive(Debug)]` here would leak on every `?` log
+    }
+}
+```
+
+## 5. Errors
+
+- Handle every error. Log it with context and a correlation id; return a generic message that
+  carries only that id.
+- Never render a stack trace, SQL statement, file path, hostname, or component version to a
+  caller. Debug mode stays off outside local development.
+- No silent swallowing: no bare `let _ =` on a `Result`, no `unwrap()`, `expect()`, or `panic!`
+  on a request, command, or callback path. An unhandled panic is a bug, not an error path.
+- Define a domain error per module with `thiserror` and map it at the edge.
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum AuthError {
+    #[error("invalid credentials")]
+    InvalidCredentials,
+    #[error("account locked")]
+    Locked { retry_after: std::time::Duration },
+}
+
+// At the edge: log the detail, return the id.
+tracing::error!(correlation_id = %id, error = ?err, "request failed");
+(StatusCode::INTERNAL_SERVER_ERROR, format!("request failed (ref {id})"))
+```
+
+## 6. Audit trail and logging
+
+They are two mechanisms and stay separate. The audit trail is for accountability; the log is for
+diagnostics.
+
+Audit **every** security-relevant event: sign-in success **and** failure, sign-out, account
+creation or change, credential creation or change, password change, permission change,
+configuration change, data export, backup restore, every administrative action. Record at least
+timestamp, actor, event, target, source IP, and a structured detail field — with no secret or
+sensitive value in the detail.
+
+The trail lives on a **separate database instance** from production data, and the application's
+role holds `INSERT` **only**; immutability is enforced by database grants, never by application
+discipline. Asynchronous writes are fine; **silent loss is not** — a failure to audit raises an
+alert.
+
+Logging: one library, used everywhere, configured centrally. No `println!`/`eprintln!` outside
+`main` startup. At least Info/Warn/Error. House format:
+
+```
+[dd/mm/yyyy] hh:mm:ss ; event ; details
+[29/07/2026] 14:32:05 ; login.failed ; user=jsilva ip=10.2.3.4 attempt=3 lockout=60s
+```
+
+Structured JSON logging is fine provided it keeps the same three fields as keys.
+
+## 7. Nothing that bypasses the rules
+
+No arbitrary-SQL endpoint. No admin screen that runs free-form queries. No support backdoor. No
+flag that skips authentication outside production. No mutable global state fed by user input —
+configuration is loaded from a trusted source and immutable at runtime; inject dependencies
+instead of reaching for singletons. Whoever adds a shortcut owns every misuse of it.
+
+Protect every service endpoint — read-only ones included — with TLS plus an access key or token,
+and restrict by source IP where the caller is predictable. Expose the minimum data needed. Avoid
+heavy database work on unauthenticated surfaces; cache instead.
+
+## 8. Dependencies
+
+Check the support horizon **before** adopting a dependency; discontinued or unmaintained
+components are not allowed. Patch-level updates at least quarterly. A **critical** vulnerability
+in a dependency outranks every feature request — fix it first and say so.
+
+```bash
+cargo audit          # RUSTSEC advisories
+cargo deny check     # advisories, bans, licenses, sources
+```
+
+An advisory may only be ignored in `deny.toml` with a written justification naming the upstream
+blocker and why the code path is unreachable. "Noisy" is not a justification. Never commit a
+`Cargo.lock` change you have not reviewed.
+
+## 9. Coverage: 85% overall, 95% security-sensitive
+
+Both floors are gates, not targets.
+
+```bash
+# Overall floor — 85% line coverage.
+cargo llvm-cov --all-features --workspace --fail-under-lines 85
+
+# Both floors at once: 85% overall plus 95% on every path in `.security-sensitive`.
+./scripts/coverage-gate.py
+
+# Browse what is uncovered.
+cargo llvm-cov --all-features --workspace --html
+```
+
+- **Any file that implements or enforces one of the rules above is security-sensitive** —
+  authentication, authorization, session and token handling, password hashing, crypto, input
+  validation, output escaping, query construction, secret loading, the audit trail, lockout,
+  rate limiting.
+- Declare it in [`.security-sensitive`](../../../.security-sensitive) **in the same commit that
+  creates it**. An undeclared security module is an unenforced 95%, which is the whole failure
+  mode this gate exists to prevent. Reviewers check the manifest against the diff.
+- For those files, 95% of lines is the floor and **every error branch is covered**: the rejected
+  input, the denied caller, the expired token, the triggered lockout, the failed audit write. A
+  security control with an untested negative case is not tested.
+- Coverage never goes **down**, even while above the floor. Add the missing test instead of
+  lowering the gate.
+- Do not chase the number. A test that executes code without asserting on it is worse than no
+  test; an uncovered error branch means a missing test, not an excludable line. Any coverage
+  exclusion carries a comment saying why the code is untestable.
+
+Both test layers are mandatory (`AGENTS.md` §4): unit/integration tests **and** at least one
+Gherkin scenario per feature and per security control — **including the negative case**: access
+denied, input rejected, lockout triggered.
+
+```gherkin
+Scenario: A caller without the auditor role cannot export data
+  Given a signed-in user with the "viewer" role
+  When they request a data export
+  Then the request is denied with a generic error
+  And the denial is recorded in the audit trail
+```
+
+## 10. Before you call it done
+
+- [ ] Every new input is bounded and validated server-side; every output escaped.
+- [ ] Every query binds its values; every non-bindable part goes through an allow-list.
+- [ ] Authentication and authorization go through the single entry point, by role.
+- [ ] No secret, credential, or production data entered the repository.
+- [ ] Every error is handled and logged with a correlation id; no `unwrap`/`expect`/`panic!` on a
+      request, command, or callback path; no bare `let _ =` on a `Result`.
+- [ ] Every security-relevant action is audited and logged.
+- [ ] New security-sensitive files are listed in `.security-sensitive`.
+- [ ] `./scripts/coverage-gate.py` passes — 85% overall, 95% on security-sensitive files — and
+      coverage did not drop.
+- [ ] `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
+      `cargo audit`, and `cargo deny check` are clean.
+- [ ] `CHANGELOG.md` has the entry (`Security` category if it fixes a vulnerability, with the
+      advisory id), and the roadmap item is ticked.
+
+If your organisation's own security standard conflicts with a rule here, the organisation's
+standard wins — and the conflict belongs in a pull request against `AGENTS.md`.
+"##;
+
+/// `.security-sensitive`. The paths the 95% coverage floor applies to, seeded with the
+/// conventional module names so the convention is discoverable before the first security
+/// control lands.
+const SECURITY_SENSITIVE: &str = r##"# Security-sensitive paths — the 95% line-coverage floor applies to every file listed here.
+# See AGENTS.md §4.3 and .claude/skills/secure-development/SKILL.md §9.
+#
+# One `fnmatch` pattern per line, relative to this directory, `#` starts a comment.
+# `*` crosses directory separators, so `*src/auth*` covers `src/auth.rs`, `src/auth/token.rs`,
+# and `server/src/auth.rs` in a workspace.
+# Checked by `./scripts/coverage-gate.py`.
+#
+# A file belongs here when it implements or enforces a security control:
+# authentication, authorization, session or token handling, password hashing, crypto,
+# input validation, output escaping, query construction, secret loading, lockout, rate
+# limiting, or the audit trail.
+#
+# Add the path in the same commit that creates the file. An undeclared security module is
+# an unenforced 95% — which is the whole failure mode this manifest exists to prevent.
+# Reviewers check this file against the diff.
+#
+# The patterns below are the conventional names, active and matching nothing yet. Keep them,
+# add yours, and delete a line only when the concept genuinely does not exist here.
+
+*src/auth*
+*src/authz*
+*src/security*
+*src/crypto*
+*src/session*
+*src/token*
+*src/password*
+*src/permission*
+*src/audit*
+*src/validation*
+"##;
+
+/// `scripts/coverage-gate.py`. Enforces both floors from `AGENTS.md` §4.3 — 85% of lines
+/// overall, 95% on every path in `.security-sensitive` — because
+/// `cargo llvm-cov --fail-under-lines` can only express one project-wide number. Python runs
+/// the gate only; nothing in the generated build depends on it.
+const COVERAGE_GATE_PY: &str = r##"#!/usr/bin/env python3
+"""Two-threshold line-coverage gate — see AGENTS.md §4.3.
+
+    85%  line coverage over the whole project
+    95%  line coverage on every file declared in `.security-sensitive`
+
+`cargo llvm-cov --fail-under-lines` enforces a single project-wide number, which is why the
+second floor needs a few lines of glue: this script asks cargo-llvm-cov for its JSON export and
+applies both thresholds to it. Python only runs the gate — nothing in the build depends on it.
+
+Usage:
+    ./scripts/coverage-gate.py                 # collect coverage, then check both floors
+    ./scripts/coverage-gate.py --json cov.json # re-check an existing llvm-cov JSON export
+    ./scripts/coverage-gate.py --min-all 90    # raise a floor (lowering one is not a fix)
+
+Exit status: 0 both floors met, 1 a floor was missed, 2 the gate could not run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import NoReturn
+
+MIN_ALL = 85.0
+MIN_SECURITY = 95.0
+MANIFEST = ".security-sensitive"
+
+
+def project_root() -> Path:
+    """The directory holding `Cargo.toml` — this script lives in `<root>/scripts/`."""
+    return Path(__file__).resolve().parent.parent
+
+
+def load_patterns(root: Path) -> list[str]:
+    """Read the security-sensitive path patterns, skipping blanks and `#` comments."""
+    manifest = root / MANIFEST
+    if not manifest.is_file():
+        return []
+    patterns = []
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            patterns.append(line)
+    return patterns
+
+
+def collect(root: Path, destination: Path) -> None:
+    """Run the test suite under instrumentation and write the JSON export."""
+    if shutil.which("cargo-llvm-cov") is None:
+        fail(
+            "cargo-llvm-cov is not installed.\n"
+            "    cargo install cargo-llvm-cov\n"
+            "Or pass an existing export with --json."
+        )
+    subprocess.run(
+        [
+            "cargo",
+            "llvm-cov",
+            "--all-features",
+            "--workspace",
+            "--summary-only",
+            "--json",
+            "--output-path",
+            str(destination),
+        ],
+        cwd=root,
+        check=True,
+    )
+
+
+def read_report(path: Path, root: Path) -> tuple[float, list[tuple[str, int, int, float]]]:
+    """Return the project-wide line percentage and a per-file `(path, covered, count, pct)` list.
+
+    Paths are made relative to the project root; anything outside it (a dependency compiled from
+    a local checkout, say) is not this project's code and is dropped.
+    """
+    export = json.loads(path.read_text(encoding="utf-8"))
+    data = export["data"][0]
+    files = []
+    for entry in data["files"]:
+        try:
+            relative = Path(entry["filename"]).resolve().relative_to(root)
+        except ValueError:
+            continue
+        lines = entry["summary"]["lines"]
+        files.append(
+            (relative.as_posix(), lines["covered"], lines["count"], float(lines["percent"]))
+        )
+    return float(data["totals"]["lines"]["percent"]), sorted(files)
+
+
+def matches(relative: str, patterns: list[str]) -> bool:
+    """`fnmatch` semantics, so `*` crosses directory separators: `src/auth*` covers the tree."""
+    return any(fnmatch.fnmatch(relative, pattern) for pattern in patterns)
+
+
+def fail(message: str) -> NoReturn:
+    print(f"coverage-gate: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--json",
+        type=Path,
+        metavar="PATH",
+        help="check an existing llvm-cov JSON export instead of collecting coverage",
+    )
+    parser.add_argument("--min-all", type=float, default=MIN_ALL, metavar="PCT")
+    parser.add_argument("--min-security", type=float, default=MIN_SECURITY, metavar="PCT")
+    args = parser.parse_args()
+
+    root = project_root()
+    patterns = load_patterns(root)
+
+    with tempfile.TemporaryDirectory() as scratch:
+        report = args.json
+        if report is None:
+            report = Path(scratch) / "coverage.json"
+            try:
+                collect(root, report)
+            except subprocess.CalledProcessError as err:
+                fail(f"cargo llvm-cov exited with {err.returncode}; fix the tests first.")
+        elif not report.is_file():
+            fail(f"{report} does not exist.")
+        try:
+            total, files = read_report(report, root)
+        except (KeyError, IndexError, ValueError) as err:
+            fail(f"{report} is not an llvm-cov JSON export ({err}).")
+
+    sensitive = []
+
+    print()
+    print(f"{'file':<52} {'lines':>13} {'covered':>9}   gate")
+    print("-" * 88)
+    for relative, covered, count, pct in files:
+        gate = ""
+        if matches(relative, patterns):
+            sensitive.append((relative, pct))
+            gate = f"security ≥ {args.min_security:.0f}%"
+            if pct < args.min_security:
+                gate += " FAIL"
+        print(f"{relative:<52} {f'{covered}/{count}':>13} {pct:>8.2f}%   {gate}")
+    print("-" * 88)
+    print(f"{'TOTAL':<52} {'':>13} {total:>8.2f}%   all ≥ {args.min_all:.0f}%")
+    print()
+
+    failures = []
+    if total < args.min_all:
+        failures.append(
+            f"overall line coverage {total:.2f}% is below the {args.min_all:.0f}% floor"
+        )
+    for relative, pct in sensitive:
+        if pct < args.min_security:
+            failures.append(
+                f"{relative} is security-sensitive and covers {pct:.2f}% of lines, "
+                f"below the {args.min_security:.0f}% floor"
+            )
+
+    if not patterns:
+        print(
+            f"note: no patterns in {MANIFEST}, so the {args.min_security:.0f}% floor matched "
+            "nothing.\n"
+            "      Declare every file that implements or enforces a security control there,\n"
+            "      in the same commit that creates it — see AGENTS.md §4.3."
+        )
+    elif not sensitive:
+        print(
+            f"note: the {len(patterns)} pattern(s) in {MANIFEST} matched no covered file yet.\n"
+            f"      That is expected until the first security control lands; keep {MANIFEST}\n"
+            "      in step with the tree so the floor applies the moment one does."
+        )
+
+    if failures:
+        print()
+        for message in failures:
+            print(f"FAIL: {message}")
+        print()
+        print(
+            "Add the missing tests — the error branches first. Lowering a floor is not a fix.\n"
+            "Browse the gaps with: cargo llvm-cov --all-features --workspace --html"
+        )
+        return 1
+
+    print(
+        f"OK: {total:.2f}% overall (floor {args.min_all:.0f}%), "
+        f"{len(sensitive)} security-sensitive file(s) at or above {args.min_security:.0f}%."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"##;
 
 // --- frontend blobs --------------------------------------------------------
 
