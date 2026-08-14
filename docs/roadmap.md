@@ -36,6 +36,7 @@
 - [x] Ship a `secure-development` Claude skill with every template and with `ironroot new`
 - [x] Raise the template coverage floor to 85% of lines, with 95% on paths declared in `.security-sensitive`, enforced by `scripts/coverage-gate.py`
 - [x] Make `ironroot new` projects pass their own coverage gate as generated — `src/lib.rs` holds the logic, `src/main.rs` only calls in, and the unit, integration and BDD layers all drive that library
+- [x] Give every template and every generated project an architecture map and four validation levels in `AGENTS.md`, so an AI assistant compiles the smallest affected target and runs the closest tests instead of rediscovering the tree and rebuilding everything
 - [ ] Implement real routing in `web-app` template (using `ironroot-web`)
 - [ ] Implement command dispatch in `cli-app` template (using `ironroot-cli`)
 - [ ] Integrate egui or Tauri into `desktop-app` template (using `ironroot-gui`)

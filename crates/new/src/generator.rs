@@ -2294,11 +2294,20 @@ This project was scaffolded by `ironroot`. AI assistants working on it
 should follow the conventions below in addition to the upstream
 [IronRoot AGENTS.md](https://github.com/ffquintella/IronRoot/blob/main/ai/AGENTS.md).
 
+**This file is the authoritative instruction set for every AI assistant working here —
+Codex, Claude Code, and any other.** `CLAUDE.md` only points back at it; it duplicates
+nothing. Add a convention here, once, not in both.
+
+Read this file first, then work from the architecture map below. Wall-clock time from task
+to validated change is a first-class metric: the map exists so you do not rediscover the
+layout, and the validation levels exist so you do not compile or test more than the change
+warrants.
+
 ## Project shape
 
 - Kind     : {kind}
 {gui_line}{frontend_line}- Database : {db}
-
+{workflow}
 ## House rules
 
 1. **Prefer composition over inheritance** — use traits and generics; avoid
@@ -2406,7 +2415,171 @@ would otherwise make belongs in a helper the tests can call directly.
             .map(|f| format!("- Frontend : {}\n", f.label()))
             .unwrap_or_default(),
         db = cfg.database.label(),
+        workflow = workflow_map(cfg),
         rules = AGENT_RULES,
+    )
+}
+
+/// The navigation half of `AGENTS.md`: which files a task touches, which target
+/// to compile, and which tests to run — cheapest first.
+///
+/// It is generated rather than kept as a `const` because every command in it has
+/// to be one *this* project can actually run: a workspace needs `-p <package>`,
+/// a single-crate project must not carry the flag, and a `--lib <filter>` has to
+/// name tests that exist. A placeholder command is worse than no command — an
+/// agent whose targeted command fails falls straight back to the full build,
+/// which is the outcome this section exists to prevent.
+fn workflow_map(cfg: &ProjectConfig) -> String {
+    let frontend_row = cfg
+        .frontend
+        .map(|f| {
+            format!(
+                "| Frontend | `frontend/` | {} single-page app, built by npm | — | `make frontend-build` — a Rust-only change never needs it |\n",
+                f.label()
+            )
+        })
+        .unwrap_or_default();
+
+    let (rows, direction, scope, filter, sibling) = match cfg.kind {
+        ProjectKind::ClientTool => (
+            concat!(
+                "| Library | `src/lib.rs` | argument parsing, dispatch, every decision the CLI makes | `src/logging.rs` | `mod tests` in the file · `tests/smoke.rs` · `tests/features/command-line.feature` |\n",
+                "| Binary | `src/main.rs` | collects `argv`, calls the library, sets the exit code | library | none, by design — keep it that way |\n",
+                "| Logging | `src/logging.rs` | the one logging entry point (§6.2) | — | `mod tests` in the file |\n",
+                "| Scenarios | `tests/features/` + `tests/bdd.rs` | behaviour, including the negative cases (§4.2) | library | themselves |\n",
+            )
+            .to_string(),
+            "`main.rs` → `lib.rs` → helper modules. Nothing points back, so a change inside a \
+             helper module can only affect that module's tests and the scenarios that reach it.",
+            String::new(),
+            "hello",
+            String::new(),
+        ),
+        ProjectKind::WebApp => (
+            concat!(
+                "| Library | `src/lib.rs` | the router, the handlers, and every decision behind them | `src/logging.rs` | `mod tests` in the file · `tests/smoke.rs` · `tests/features/endpoints.feature` |\n",
+                "| Binary | `src/main.rs` | reads the environment, calls the library, binds the port | library | none, by design — keep it that way |\n",
+                "| Logging | `src/logging.rs` | the one logging entry point (§6.2) | — | `mod tests` in the file |\n",
+                "| Scenarios | `tests/features/` + `tests/bdd.rs` | behaviour, including the negative cases (§4.2) | library | themselves |\n",
+            )
+            .to_string(),
+            "`main.rs` → `lib.rs` → helper modules. Nothing points back, so a change inside a \
+             helper module can only affect that module's tests and the scenarios that reach it. \
+             The tests drive the router in-process (`ServiceExt::oneshot`) — no port is bound, \
+             so nothing here needs a running server.",
+            String::new(),
+            "bind_address",
+            String::new(),
+        ),
+        ProjectKind::ClientServer => (
+            format!(
+                concat!(
+                    "| Workspace root | `Cargo.toml` | members: `server/`, `client/` | — | — |\n",
+                    "| Server | `server/src/lib.rs` | the router, the handlers, and every decision behind them | `server/src/logging.rs` | `mod tests` in the file · `server/tests/smoke.rs` · `server/tests/features/endpoints.feature` |\n",
+                    "| Server binary | `server/src/main.rs` | reads the environment, calls the library, binds the port | server library | none, by design |\n",
+                    "| Server logging | `server/src/logging.rs` | the one logging entry point (§6.2) | — | `mod tests` in the file |\n",
+                    "| Client | `client/src/lib.rs` | toolkit-free client state plus the {gui} shell | — | `mod tests` in the file · `client/tests/smoke.rs` · `client/tests/features/greeting.feature` |\n",
+                    "| Client binary | `client/src/main.rs` | opens the window and runs the shell | client library | none, by design |\n",
+                    "| Scenarios | `server/tests/features/` and `client/tests/features/`, run by each member's `tests/bdd.rs` | behaviour, including the negative cases (§4.2) | the member's library | themselves |\n",
+                ),
+                gui = cfg.gui.map(|g| g.label()).unwrap_or("GUI"),
+            ),
+            "Inside each member: `main.rs` → `lib.rs` → helper modules, and nothing points back. \
+             Between members: **`server` and `client` share no code.** A change to one never \
+             requires building or testing the other — only a change to the wire format between \
+             them does.",
+            format!(" -p {}-server", cfg.name),
+            "bind_address",
+            format!(
+                "\nSwap `-p {name}-server` for `-p {name}-client` when the change is on the \
+                 client side. Run both only when the format they exchange changed.\n",
+                name = cfg.name
+            ),
+        ),
+    };
+
+    format!(
+        r#"
+## Architecture map
+
+Decide from this table what to read, what to compile, and what to test. Do not rediscover
+the layout by scanning the tree.
+
+| Component | Path | Purpose | Depends on | Tests |
+|---|---|---|---|---|
+{rows}{frontend_row}| Coverage gate | `scripts/coverage-gate.py` + `.security-sensitive` | 85% overall, 95% security-sensitive (§4.3) | — | — |
+| Secure-dev skill | `.claude/skills/secure-development/SKILL.md` | §5–§6 in working form | — | — |
+| Docs | `docs/` | docsify site: roadmap, architecture, getting started | — | — |
+
+Dependency direction: {direction}
+
+**Do not read, search, or index** `target/`, `.git/`, `Cargo.lock`, `node_modules/`, or any
+`dist/`/`build/`/coverage output. They hold no source you need and are the most expensive
+part of the tree to search. Keep searches inside `src/`, `tests/`, and `docs/`, and prefer
+symbol search in a known file over a recursive sweep.
+
+## Development loop
+
+```text
+read AGENTS.md → find the component above → read only it and its direct dependencies
+→ make one coherent change → Level 1 → Level 2 → Level 3 once
+```
+
+- **Compile the smallest thing that proves the change.** `cargo check` before `cargo build`,
+  one package before the workspace, one test before the suite.
+- **Batch edits.** Finish a coherent change, then validate. Never edit → full build → edit.
+- **Never `cargo clean`, never delete `target/`.** Reusing the incremental cache is the single
+  largest saving available here; a clean build "to be sure" costs minutes and proves nothing
+  the incremental one did not.
+- **Escalate on evidence, not on habit.** Level 3 runs once, at the end. CI is the
+  authoritative full validation — do not reproduce it after every edit.
+- **Parallelize independent work**: reading unrelated modules, searching separate paths,
+  independent test targets. Do not run two cargo commands against the same target directory
+  at once — they queue on the same lock and finish later than they would in sequence.
+
+### Level 1 — fast, run continuously (seconds)
+
+```bash
+cargo fmt --all
+cargo check{scope} --all-targets  # types and borrows; no codegen, no linking
+cargo test{scope} --lib {filter}  # the closest tests, filtered by name
+```
+
+### Level 2 — component, when a coherent change is finished
+
+```bash
+cargo clippy{scope} --all-targets -- -D warnings
+cargo test{scope} --lib  # unit tests only
+cargo test{scope} --test smoke  # integration tests only
+cargo test{scope} --test bdd  # scenarios only
+```
+{sibling}
+### Level 3 — project, once, before calling the change done
+
+```bash
+make test
+make coverage  # 85% overall, 95% security-sensitive
+```
+
+`make coverage` recompiles with instrumentation, so run it per change, not per edit. To
+re-check the floors without recompiling, keep the export and re-read it:
+
+```bash
+cargo llvm-cov --all-features --workspace --json --output-path target/cov.json
+./scripts/coverage-gate.py --json target/cov.json
+```
+
+### Level 4 — expensive, only when the change warrants it
+
+```bash
+make audit  # cargo audit + cargo deny check
+cargo llvm-cov --all-features --workspace --html  # browse uncovered lines
+cargo build --release
+```
+
+Level 4 is warranted when the change touches a dependency (`make audit`, always), a security
+control, or performance. Otherwise leave it to CI.
+"#
     )
 }
 
@@ -2429,6 +2602,8 @@ handling, logging, the audit trail, or a dependency — and before calling any c
 
 | Topic | Rule | Section |
 |---|---|---|
+| Navigation | Start from the architecture map — read only the component you are changing and its direct dependencies; never scan the tree or search `target/` | Architecture map |
+| Speed | Smallest target, closest test, cheapest level first; batch edits before validating; never `cargo clean` | Development loop |
 | Roadmap | Every change maps to an item in [`docs/roadmap.md`](docs/roadmap.md); tick it in the same commit | §1 |
 | Versioning | Semantic Versioning; no silent breaking changes; tag every release | §2 |
 | Changelog | Update [`CHANGELOG.md`](CHANGELOG.md) under `## [Unreleased]` in the same commit | §3 |

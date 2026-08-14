@@ -12,6 +12,20 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 
 ### Added
 
+- [AGENTS.md](AGENTS.md) opens with an **architecture map** and a **development loop**, so an
+  AI assistant — Codex, Claude Code, or any other — can answer "which files do I read, which
+  target do I compile, which tests do I run?" without scanning the tree. The map is a table of
+  the CLI's library, binary, scenarios, coverage gate and secure-development skill,
+  with each component's path, purpose,
+  dependencies and tests, plus the directories never worth reading or searching (`target/`,
+  `Cargo.lock`, coverage output). The loop defines four validation levels — Level 1
+  `cargo fmt` + `cargo check --all-targets` + a name-filtered `cargo test --lib`, Level 2
+  clippy and the component's own test targets, Level 3 `cargo test` plus
+  `./scripts/coverage-gate.py` once, Level 4 `cargo audit` / `cargo deny check` / release
+  builds only when the change warrants them — and states the rules that keep them cheap: batch
+  edits before validating, compile the smallest affected target, never `cargo clean` or delete
+  `target/`, and leave the exhaustive run to CI. [CLAUDE.md](CLAUDE.md) gains two rows pointing
+  at both sections; it still duplicates nothing.
 - A `secure-development` skill now ships with the template, at
   `.claude/skills/secure-development/SKILL.md`. Claude Code loads it automatically in this
   template and in any project started from it, and it carries [AGENTS.md](AGENTS.md) §5–§6 in

@@ -15,6 +15,8 @@ handling, logging, the audit trail, or a dependency — and before calling any c
 
 | Topic | Rule | Section |
 |---|---|---|
+| Navigation | Start from the architecture map — read only the component you are changing and its direct dependencies; never scan the tree or search `target/` | Architecture map |
+| Speed | Smallest target, closest test, cheapest level first; batch edits before validating; never `cargo clean` | Development loop |
 | Roadmap | Every change maps to an item in [`docs/roadmap.md`](../../docs/roadmap.md); tick it in the same commit | §1 |
 | Versioning | Semantic Versioning; no silent breaking changes; tag every release | §2 |
 | Changelog | Update `CHANGELOG.md` under `## [Unreleased]` in the same commit | §3 |

@@ -29,6 +29,95 @@ Desktop-specific cautions on top of §5:
 - UI callbacks stay thin. Business logic lives in `src/` helpers so it can be unit- and
   BDD-tested without a window.
 
+## Architecture map
+
+Decide from this table what to read, what to compile, and what to test. Do not rediscover the
+layout by scanning the tree.
+
+| Component | Path | Purpose | Depends on | Tests |
+|---|---|---|---|---|
+| Library | `src/lib.rs` | `banner` — every decision the placeholder binary makes; the toolkit-free client state goes here | — | `mod tests` at the bottom of the file |
+| Binary | `src/main.rs` | prints the banner; will open the window once `ironroot-gui` is wired in | library | none, by design — keep it that way |
+| Scenarios | [`tests/features/banner.feature`](tests/features/banner.feature) + [`tests/bdd.rs`](tests/bdd.rs) | behaviour, including the negative cases (§4.2) | library | themselves |
+| Coverage gate | [`scripts/coverage-gate.py`](scripts/coverage-gate.py) + [`.security-sensitive`](.security-sensitive) | 85% overall, 95% security-sensitive (§4.3) | — | — |
+| Secure-dev skill | [`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) | §5 and §6 in working form | — | — |
+
+`ironroot-desktop-app` is a standalone crate, not a member of the IronRoot workspace: run
+every command below **from this directory**, never from the repository root. Dependencies
+point one way,
+`main.rs` → `lib.rs` → helper modules; nothing points back, so a change inside a helper module
+can only affect that module's tests and the scenarios that reach it.
+
+**Do not read, search, or index** `target/`, `Cargo.lock`, or any coverage output. They hold no
+source you need and are the most expensive part of the tree to search. Keep searches inside
+`src/` and `tests/`, and prefer a symbol search in a known file over a recursive sweep.
+
+---
+
+## Development loop
+
+Wall-clock time from task to validated change is a first-class metric. Compile the smallest
+target that proves the change, run the closest test first, and escalate only on evidence.
+
+```text
+read AGENTS.md → find the component above → read only it and its direct dependencies
+→ make one coherent change → Level 1 → Level 2 → Level 3 once
+```
+
+- **Compile the smallest thing that proves the change** — `cargo check` before `cargo build`,
+  one test before the suite.
+- **Batch edits.** Finish a coherent change, then validate. Never edit → full build → edit.
+- **Never `cargo clean`, never delete `target/`.** Reusing the incremental cache is the single
+  largest saving available here; a clean build "to be sure" costs minutes and proves nothing
+  the incremental one did not.
+- **Escalate on evidence, not on habit.** Level 3 runs once, at the end. CI is the
+  authoritative full validation — do not reproduce it after every edit.
+- **Parallelize independent work**: reading unrelated files, searching separate paths. Do not
+  run two cargo commands against the same `target/` at once — they queue on the same lock and
+  finish later than they would in sequence.
+
+### Level 1 — fast, run continuously (seconds)
+
+```bash
+cargo fmt --all
+cargo check --all-targets  # types and borrows; no codegen, no linking
+cargo test --lib banner_lists  # the closest tests, filtered by name
+```
+
+### Level 2 — component, when a coherent change is finished
+
+```bash
+cargo clippy --all-targets -- -D warnings
+cargo test --lib  # unit tests only
+cargo test --test bdd  # scenarios only
+```
+
+### Level 3 — project, once, before calling the change done
+
+```bash
+cargo test
+./scripts/coverage-gate.py  # 85% overall, 95% security-sensitive
+```
+
+The gate recompiles with instrumentation, so run it once per change, not per edit. To re-check
+both floors without recompiling, keep the export and re-read it:
+
+```bash
+cargo llvm-cov --all-features --workspace --json --output-path target/cov.json
+./scripts/coverage-gate.py --json target/cov.json
+```
+
+### Level 4 — expensive, only when the change warrants it
+
+```bash
+cargo audit && cargo deny check  # after any dependency change — see §6.3
+cargo llvm-cov --all-features --workspace --html  # browse uncovered lines
+cargo build --release
+```
+
+Level 4 is warranted when the change touches a dependency, a security control, or performance.
+Otherwise leave it to CI.
+
 ---
 
 ## 1. Follow the roadmap
