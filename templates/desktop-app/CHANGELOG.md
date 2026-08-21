@@ -12,6 +12,28 @@ makes the change** — see [AGENTS.md](AGENTS.md) §3.
 
 ### Added
 
+- **Cross-session recall.** Instructions given in one coding session no longer die with it.
+  [`.claude/memory/recall.py`](.claude/memory/recall.py) keeps a small store of durable
+  instructions — a stated preference, an undocumented convention, a trap someone hit once —
+  and injects the strongest into every later session. Relevance is ACT-R base-level
+  activation, `ln(SUM (now - t)^-0.5)` over each past use, so recent and frequent both count
+  and what stops being used fades and is archived rather than deleted. The render budget is
+  capped at ~40 lines: that cap, not the arithmetic, is what makes the ranking matter. Two
+  rules keep it honest — rendering a memory does not reinforce it (only `use`, or an edit to
+  a file it is `--anchor`ed to, does, so nothing in the prompt can reinforce itself), and
+  `add` reports overlapping memories so a contradiction is resolved with `supersede` instead
+  of leaving two instructions competing. The store is one SQLite file in `~/.claude/memory/`,
+  shared across projects, with each memory scoped to this repository or to `global`.
+  [`.claude/settings.json`](.claude/settings.json) makes it automatic: inject at session
+  start, capture an explicit `remember:` directive, and reinforce anchored memories on edit.
+  [`.claude/skills/session-recall/SKILL.md`](.claude/skills/session-recall/SKILL.md) tells an
+  assistant when to write, reinforce and retire one; `AGENTS.md` gains a **Session recall**
+  section, a row in the architecture map and an item in the §7 checklist. Other assistants
+  read the same memories with no protocol between them —
+  `recall.py render --into AGENTS.local.md` splices a managed block into any markdown file.
+  33 tests in [`.claude/memory/test_recall.py`](.claude/memory/test_recall.py) cover the
+  ranking claims, both honesty rules, the budget and the hooks.
+
 - [AGENTS.md](AGENTS.md) opens with an **architecture map** and a **development loop**, so an
   AI assistant — Codex, Claude Code, or any other — can answer "which files do I read, which
   target do I compile, which tests do I run?" without scanning the tree. The map is a table of

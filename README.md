@@ -30,6 +30,7 @@ IronRoot is:
 | OOP-like support | Traits first; optional helpers (`classes`, `inherit-methods-macro`) for richer patterns |
 | Multi-interface templates | Starter projects for web, CLI, and desktop applications |
 | AI + MCP readiness | Built-in AI agent conventions and MCP server scaffolding |
+| Cross-session recall | Instructions given in one coding session carry into the next, ranked by how recently and often each mattered ([`ai/memory/`](ai/memory/)) |
 
 ---
 
@@ -45,7 +46,10 @@ ironroot/
 │   └── roadmap.md          # Development roadmap
 ├── ai/
 │   ├── AGENTS.md           # AI agent roles and rules
-│   └── INSTRUCTIONS.md     # Extension and contribution guidelines
+│   ├── INSTRUCTIONS.md     # Extension and contribution guidelines
+│   └── memory/             # Cross-session recall: instructions that survive a session
+│       ├── recall.py       #   the store and its CLI (ACT-R activation, SQLite)
+│       └── SKILL.md        #   when to write, reinforce, and retire a memory
 ├── mcp/
 │   ├── servers/
 │   │   └── example_server/ # Minimal MCP server binary
@@ -58,6 +62,9 @@ ironroot/
 │   └── gui/                # Desktop UI placeholder (Tauri/egui)
 └── templates/              # Each template also ships:
     │                       #   .claude/skills/secure-development/ — secure-dev skill
+    │                       #   .claude/skills/session-recall/     — cross-session memory
+    │                       #   .claude/memory/recall.py           — the memory store
+    │                       #   .claude/settings.json              — the recall hooks
     │                       #   .security-sensitive                — 95%-coverage paths
     │                       #   scripts/coverage-gate.py           — 85% / 95% gates
     ├── web-app/            # Standalone web application template

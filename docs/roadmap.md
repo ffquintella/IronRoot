@@ -37,6 +37,7 @@
 - [x] Raise the template coverage floor to 85% of lines, with 95% on paths declared in `.security-sensitive`, enforced by `scripts/coverage-gate.py`
 - [x] Make `ironroot new` projects pass their own coverage gate as generated — `src/lib.rs` holds the logic, `src/main.rs` only calls in, and the unit, integration and BDD layers all drive that library
 - [x] Give every template and every generated project an architecture map and four validation levels in `AGENTS.md`, so an AI assistant compiles the smallest affected target and runs the closest tests instead of rediscovering the tree and rebuilding everything
+- [x] Ship cross-session recall with every template and with `ironroot new` — `.claude/memory/recall.py`, the `session-recall` skill, and the hooks that inject, capture and reinforce memories automatically
 - [ ] Implement real routing in `web-app` template (using `ironroot-web`)
 - [ ] Implement command dispatch in `cli-app` template (using `ironroot-cli`)
 - [ ] Integrate egui or Tauri into `desktop-app` template (using `ironroot-gui`)
@@ -50,6 +51,7 @@
 
 - [x] Scaffold MCP example server (`mcp/servers/example_server`)
 - [x] Define AI agent conventions (`ai/AGENTS.md`, `ai/INSTRUCTIONS.md`)
+- [x] Give agents memory across sessions (`ai/memory/`) — instructions from one session rank by ACT-R base-level activation and the strongest are injected into the next, in any assistant that reads a markdown instruction file
 - [ ] Implement MCP protocol (stdio transport) in example server
 - [ ] Expose IronRoot workspace tools as MCP resources
 - [ ] Add agent prompts for generating new crates, macros, and templates

@@ -1,0 +1,46 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=.claude/memory/recall.py; [ -x \"$R\" ] || R=\"$HOME/.claude/memory/recall.py\"; python3 \"$R\" hook session-start 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Recalling context"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=.claude/memory/recall.py; [ -x \"$R\" ] || R=\"$HOME/.claude/memory/recall.py\"; python3 \"$R\" hook prompt-submit 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "R=.claude/memory/recall.py; [ -x \"$R\" ] || R=\"$HOME/.claude/memory/recall.py\"; python3 \"$R\" hook post-edit 2>/dev/null || true",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(python3 .claude/memory/recall.py:*)",
+      "Bash(./.claude/memory/recall.py:*)"
+    ]
+  }
+}

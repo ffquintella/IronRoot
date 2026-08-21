@@ -1,10 +1,15 @@
-.PHONY: build test fmt lint check clean new docs install uninstall
+.PHONY: build test test-memory fmt lint check clean new docs install uninstall
 
 build:
 	cargo build --workspace
 
-test:
+test: test-memory
 	cargo test --workspace
+
+# Cross-session recall is Python, so `cargo test` cannot reach it.
+# See the Session Recall section of ai/AGENTS.md.
+test-memory:
+	python3 ai/memory/test_recall.py
 
 fmt:
 	cargo fmt --all

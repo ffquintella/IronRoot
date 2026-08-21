@@ -24,6 +24,7 @@ handling, logging, the audit trail, or a dependency — and before calling any c
 | Coverage | `./scripts/coverage-gate.py` must pass — **85%** of lines overall, **95%** on every file in [`.security-sensitive`](.security-sensitive) — and coverage must not drop | §4.3 |
 | Secure code | Parameterized queries, output escaping, bounded input, handled errors, no secrets in the repo, no `unsafe` | §5 |
 | Audit | Every security-relevant action audited to an INSERT-only store on a separate instance; `cargo audit` + `cargo deny check` clean | §6 |
+| Memory | Durable instructions carry between sessions via `.claude/memory/recall.py`; reinforce what you applied, supersede what is wrong | Session recall |
 | Done | Work through the checklist before saying a change is finished | §7 |
 
 Every HTTP handler you add is a security boundary: authenticate and authorize through the
