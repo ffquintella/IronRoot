@@ -15,6 +15,8 @@ handling, logging, the audit trail, or a dependency — and before calling any c
 
 | Topic | Rule | Section |
 |---|---|---|
+| Navigation | Start from the architecture map — read only the component you are changing and its direct dependencies; never scan the tree or search `target/` | Architecture map |
+| Speed | Smallest target, closest test, cheapest level first; batch edits before validating; never `cargo clean` | Development loop |
 | Roadmap | Every change maps to an item in [`docs/roadmap.md`](../../docs/roadmap.md); tick it in the same commit | §1 |
 | Versioning | Semantic Versioning; no silent breaking changes; tag every release | §2 |
 | Changelog | Update `CHANGELOG.md` under `## [Unreleased]` in the same commit | §3 |
@@ -22,6 +24,7 @@ handling, logging, the audit trail, or a dependency — and before calling any c
 | Coverage | `./scripts/coverage-gate.py` must pass — **85%** of lines overall, **95%** on every file in [`.security-sensitive`](.security-sensitive) — and coverage must not drop | §4.3 |
 | Secure code | Parameterized queries, output escaping, bounded input, handled errors, no secrets in the repo, no `unsafe` | §5 |
 | Audit | Every security-relevant action audited to an INSERT-only store on a separate instance; `cargo audit` + `cargo deny check` clean | §6 |
+| Memory | Durable instructions carry between sessions via `.claude/memory/recall.py`; reinforce what you applied, supersede what is wrong | Session recall |
 | Done | Work through the checklist before saying a change is finished | §7 |
 
 Arguments, environment variables, file paths, and stdin are untrusted input. Bound them,

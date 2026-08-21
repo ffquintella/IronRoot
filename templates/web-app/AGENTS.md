@@ -22,6 +22,149 @@ Because this template serves HTTP, §5.3 (injection, output escaping, input limi
 handling) and §5.1 (authentication, authorization, lockout) apply to every handler you add,
 starting with the first one.
 
+## Architecture map
+
+Decide from this table what to read, what to compile, and what to test. Do not rediscover the
+layout by scanning the tree.
+
+| Component | Path | Purpose | Depends on | Tests |
+|---|---|---|---|---|
+| Library | `src/lib.rs` | `banner` — every decision the placeholder binary makes; the router and handlers go here | — | `mod tests` at the bottom of the file |
+| Binary | `src/main.rs` | prints the banner; will bind the port once `ironroot-web` is wired in | library | none, by design — keep it that way |
+| Scenarios | [`tests/features/banner.feature`](tests/features/banner.feature) + [`tests/bdd.rs`](tests/bdd.rs) | behaviour, including the negative cases (§4.2) | library | themselves |
+| Coverage gate | [`scripts/coverage-gate.py`](scripts/coverage-gate.py) + [`.security-sensitive`](.security-sensitive) | 85% overall, 95% security-sensitive (§4.3) | — | — |
+| Secure-dev skill | [`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) | §5 and §6 in working form | — | — |
+| Session recall | [`.claude/memory/recall.py`](.claude/memory/recall.py) + [`.claude/skills/session-recall/SKILL.md`](.claude/skills/session-recall/SKILL.md) | instructions carried between sessions, ranked by recency and frequency (Session recall) | — | — |
+
+`ironroot-web-app` is a standalone crate, not a member of the IronRoot workspace: run
+every command below **from this directory**, never from the repository root. Dependencies
+point one way,
+`main.rs` → `lib.rs` → helper modules; nothing points back, so a change inside a helper module
+can only affect that module's tests and the scenarios that reach it.
+
+**Do not read, search, or index** `target/`, `Cargo.lock`, or any coverage output. They hold no
+source you need and are the most expensive part of the tree to search. Keep searches inside
+`src/` and `tests/`, and prefer a symbol search in a known file over a recursive sweep.
+
+---
+
+## Development loop
+
+Wall-clock time from task to validated change is a first-class metric. Compile the smallest
+target that proves the change, run the closest test first, and escalate only on evidence.
+
+```text
+read AGENTS.md → find the component above → read only it and its direct dependencies
+→ make one coherent change → Level 1 → Level 2 → Level 3 once
+```
+
+- **Compile the smallest thing that proves the change** — `cargo check` before `cargo build`,
+  one test before the suite.
+- **Batch edits.** Finish a coherent change, then validate. Never edit → full build → edit.
+- **Never `cargo clean`, never delete `target/`.** Reusing the incremental cache is the single
+  largest saving available here; a clean build "to be sure" costs minutes and proves nothing
+  the incremental one did not.
+- **Escalate on evidence, not on habit.** Level 3 runs once, at the end. CI is the
+  authoritative full validation — do not reproduce it after every edit.
+- **Parallelize independent work**: reading unrelated files, searching separate paths. Do not
+  run two cargo commands against the same `target/` at once — they queue on the same lock and
+  finish later than they would in sequence.
+
+### Level 1 — fast, run continuously (seconds)
+
+```bash
+cargo fmt --all
+cargo check --all-targets  # types and borrows; no codegen, no linking
+cargo test --lib banner_points  # the closest tests, filtered by name
+```
+
+### Level 2 — component, when a coherent change is finished
+
+```bash
+cargo clippy --all-targets -- -D warnings
+cargo test --lib  # unit tests only
+cargo test --test bdd  # scenarios only
+```
+
+### Level 3 — project, once, before calling the change done
+
+```bash
+cargo test
+./scripts/coverage-gate.py  # 85% overall, 95% security-sensitive
+```
+
+The gate recompiles with instrumentation, so run it once per change, not per edit. To re-check
+both floors without recompiling, keep the export and re-read it:
+
+```bash
+cargo llvm-cov --all-features --workspace --json --output-path target/cov.json
+./scripts/coverage-gate.py --json target/cov.json
+```
+
+### Level 4 — expensive, only when the change warrants it
+
+```bash
+cargo audit && cargo deny check  # after any dependency change — see §6.3
+cargo llvm-cov --all-features --workspace --html  # browse uncovered lines
+cargo build --release
+```
+
+Level 4 is warranted when the change touches a dependency, a security control, or performance.
+Otherwise leave it to CI.
+
+---
+
+## Session recall
+
+Sessions do not share context, so anything said in one and not written down is lost. Two
+scripts close that gap, and they are not the same thing:
+
+- **`AGENTS.md` — this file — is for rules.** Anything a reader needs every time, anything a
+  reviewer would enforce, anything worth arguing about in a pull request. It is versioned,
+  reviewed, and read in full.
+- **`.claude/memory/recall.py` is for the rest.** A preference stated in passing, a
+  convention nobody has written down yet, a trap someone hit once. Cheap to add, cheap to be
+  wrong about, and it fades if it stops mattering.
+
+Recall ranks memories by ACT-R base-level activation — `ln(SUM (now - t)^-0.5)` over each past
+use — so recent and frequent both count, and the strongest ~40 lines are injected at the start
+of every later session. The store is one SQLite file in `~/.claude/memory/`, shared across
+projects, with each memory scoped to this repository or to `global`.
+
+```bash
+.claude/memory/recall.py add "Prefer X over Y here" --kind convention --scope .
+.claude/memory/recall.py add "Never edit migrations/ without asking" --scope . --anchor migrations/
+.claude/memory/recall.py list --scope .
+.claude/memory/recall.py use 12         # this one shaped the change — reinforce it
+.claude/memory/recall.py supersede 7 --by 12
+```
+
+Two rules make the difference between a memory that helps and one that misleads:
+
+- **Rendering is not using.** A memory appearing in the injected block does not reinforce
+  it — only `use`, or an edit to a file it is `--anchor`ed to. Counting injections would let
+  whatever is already in the prompt reinforce itself into a permanent fixture.
+- **A stale memory is worse than none.** When one turns out to be wrong, `supersede` or
+  `forget` it and say so. Never work around it silently and never leave two contradictory
+  memories competing.
+
+If a memory is still being applied a month later, it has earned a place in this file. Promote
+it here and supersede the row.
+
+Other assistants read the same memories without a protocol between them:
+
+```bash
+.claude/memory/recall.py render --scope . --into AGENTS.local.md
+```
+
+`recall.py` is Python, so `cargo test` cannot reach it. Run its own suite after any change to
+it — a scoring bug there is invisible, because a wrong exponent still produces a
+plausible-looking ordered list:
+
+```bash
+python3 .claude/memory/test_recall.py
+```
+
 ---
 
 ## 1. Follow the roadmap
@@ -345,6 +488,9 @@ A change is complete only when **all** of these hold:
 - [ ] Every security-relevant action the change introduces is audited (§6.1) and logged (§6.2).
 - [ ] No secret, credential, or production data was added to the repository.
 - [ ] Every new public item has a `///` doc comment; every new module has a `//!` comment.
+- [ ] Every durable instruction from this session is either in this file or stored with
+      `.claude/memory/recall.py add`, and every recalled memory that shaped the change was
+      reinforced with `use` — or superseded, if it turned out to be wrong.
 
 ---
 
@@ -357,6 +503,8 @@ A change is complete only when **all** of these hold:
 - [`.claude/skills/secure-development/SKILL.md`](.claude/skills/secure-development/SKILL.md) —
   §5 and §6 in working form, for you and for any AI assistant.
 - [`.security-sensitive`](.security-sensitive) — which paths the 95% coverage floor applies to.
+- [`.claude/memory/recall.py`](.claude/memory/recall.py) — instructions carried over from
+  earlier sessions. Softer than this file and subject to decay; see Session recall.
 
 If a rule here conflicts with your organisation's own security standard, the organisation's
 standard wins — and the conflict belongs in a pull request against this file.
