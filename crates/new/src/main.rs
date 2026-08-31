@@ -141,15 +141,13 @@ fn run() -> Result<(), String> {
     }
 
     if target.exists() {
-        let empty = target
-            .read_dir()
-            .map_err(|e| format!("cannot read {}: {e}", target.display()))?
-            .next()
-            .is_none();
-        if !empty {
+        let blocking = blocking_entries(&target)
+            .map_err(|e| format!("cannot read {}: {e}", target.display()))?;
+        if !blocking.is_empty() {
             return Err(format!(
-                "target directory {} exists and is not empty",
-                target.display()
+                "target directory {} exists and is not empty (found {})",
+                target.display(),
+                describe_entries(&blocking)
             ));
         }
     }
@@ -172,6 +170,54 @@ fn run() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Directory entries that do not count as "the target directory is occupied".
+///
+/// Running `git init` (or cloning an empty repository) and then bootstrapping
+/// into that directory is a normal flow, but it leaves `.git/` behind, which
+/// used to make the target look occupied. VCS metadata and OS scratch files are
+/// not project files, so they are ignored. `.gitignore` deliberately is *not*
+/// on this list — the generator writes one, so an existing one is a real
+/// conflict.
+const IGNORED_ENTRIES: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    ".jj",
+    ".DS_Store",
+    "Thumbs.db",
+    ".keep",
+    ".gitkeep",
+];
+
+/// Names in `dir` that block generation, sorted; empty means "effectively empty".
+fn blocking_entries(dir: &Path) -> io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in dir.read_dir()? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if !IGNORED_ENTRIES.contains(&name.as_str()) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// Render blocking entry names for an error message, capped so a directory with
+/// hundreds of files does not print hundreds of names.
+fn describe_entries(names: &[String]) -> String {
+    const MAX_SHOWN: usize = 5;
+    let shown = names
+        .iter()
+        .take(MAX_SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match names.len().checked_sub(MAX_SHOWN) {
+        Some(rest) if rest > 0 => format!("{shown} and {rest} more"),
+        _ => shown,
+    }
 }
 
 fn validate_name(name: &str) -> Result<(), String> {
@@ -198,4 +244,50 @@ fn flush() {
 #[allow(dead_code)]
 fn ensure_dir(p: &Path) -> io::Result<()> {
     std::fs::create_dir_all(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn fresh_git_repo_counts_as_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(dir.path().join(".git")).expect("mkdir .git");
+        fs::write(
+            dir.path().join(".git").join("HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .expect("write");
+        fs::write(dir.path().join(".DS_Store"), "").expect("write");
+
+        assert!(blocking_entries(dir.path()).expect("read").is_empty());
+    }
+
+    #[test]
+    fn real_files_still_block() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(dir.path().join(".git")).expect("mkdir .git");
+        fs::write(dir.path().join("Cargo.toml"), "").expect("write");
+        fs::write(dir.path().join(".gitignore"), "").expect("write");
+
+        assert_eq!(
+            blocking_entries(dir.path()).expect("read"),
+            vec![".gitignore".to_owned(), "Cargo.toml".to_owned()]
+        );
+    }
+
+    #[test]
+    fn empty_dir_has_no_blocking_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(blocking_entries(dir.path()).expect("read").is_empty());
+    }
+
+    #[test]
+    fn describe_entries_caps_the_list() {
+        let names: Vec<String> = (0..8).map(|i| format!("f{i}")).collect();
+        assert_eq!(describe_entries(&names), "f0, f1, f2, f3, f4 and 3 more");
+        assert_eq!(describe_entries(&names[..2]), "f0, f1");
+    }
 }

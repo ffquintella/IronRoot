@@ -1904,11 +1904,14 @@ checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
 
 [[package]]
 name = "ironroot"
-version = "0.2.0"
+version = "0.2.1"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "ironroot-auth"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -1929,18 +1932,18 @@ dependencies = [
 
 [[package]]
 name = "ironroot-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ironroot-core",
 ]
 
 [[package]]
 name = "ironroot-core"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "ironroot-dal"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "deadpool",
@@ -1956,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "ironroot-dal-hiqlite"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "hiqlite",
  "thiserror 2.0.20",
@@ -1965,14 +1968,14 @@ dependencies = [
 
 [[package]]
 name = "ironroot-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ironroot-core",
 ]
 
 [[package]]
 name = "ironroot-log"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "file-rotate",
  "syslog",
@@ -1985,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "ironroot-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1994,11 +1997,11 @@ dependencies = [
 
 [[package]]
 name = "ironroot-mcp-example"
-version = "0.2.0"
+version = "0.2.1"
 
 [[package]]
 name = "ironroot-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ironroot-core",
 ]

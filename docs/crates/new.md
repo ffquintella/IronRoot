@@ -78,7 +78,11 @@ my-app/
 
 - Project name must be ASCII alphanumeric + `-` / `_`, not starting with a
   digit.
-- Target directory must be empty (or non-existent).
+- Target directory must be empty (or non-existent). VCS metadata and OS
+  scratch entries (`.git`, `.hg`, `.svn`, `.jj`, `.DS_Store`, `Thumbs.db`,
+  `.keep`, `.gitkeep`) are ignored, so bootstrapping into a freshly
+  `git init`-ed directory works. An existing `.gitignore` still blocks,
+  because the generator writes one.
 - Existing IronRoot workspace files are never overwritten.
 
 ## See also

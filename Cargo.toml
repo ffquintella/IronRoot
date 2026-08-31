@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 # Floor is set by hiqlite 0.14 (1.95) and sqlx 0.9 (1.94); edition 2024 itself
 # only needs 1.85. Bump deliberately — this is a published framework, and a
@@ -38,8 +38,8 @@ authors = ["IronRoot Contributors"]
 # and drifted a full major behind. Add anything used by two or more crates.
 [workspace.dependencies]
 # Internal crates — path + version so the workspace stays publishable.
-ironroot-core = { path = "crates/core", version = "0.2.0" }
-ironroot-dal = { path = "crates/dal", version = "0.2.0" }
+ironroot-core = { path = "crates/core", version = "0.2.1" }
+ironroot-dal = { path = "crates/dal", version = "0.2.1" }
 
 # Shared third-party.
 async-trait = "0.1"
