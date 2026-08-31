@@ -50,6 +50,11 @@ jobs:
       # the action fails with "Resource not accessible by integration" after
       # doing all the work.
       checks: write
+      # On `schedule` runs the same action also files one issue per advisory
+      # instead of only failing the check, and that call needs its own scope —
+      # the weekly cron run failed on it while push and pull_request runs,
+      # which never reach the issue path, stayed green.
+      issues: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.1
         with:
