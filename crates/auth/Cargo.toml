@@ -14,13 +14,10 @@ dal = ["dep:ironroot-dal"]
 pq-seal = ["dep:ml-kem", "dep:chacha20poly1305", "dep:sha2", "dep:hkdf", "dep:base64"]
 
 [dependencies]
-argon2 = "0.5"
-password-hash = { version = "0.5", features = ["std"] }
-# Pinned to 0.6 by `argon2 0.5` / `password-hash 0.5` (the latest stable
-# release of that stack) — used for Argon2id salt generation in `password.rs`.
-rand_core = { version = "0.6", features = ["std"] }
-# The newer RustCrypto generation (ml-kem/sha2/chacha20poly1305) is on
-# rand_core 0.10; `rand 0.10` matches it and is used only by `pq.rs`.
+argon2 = "0.6"
+password-hash = "0.6"
+# RustCrypto generation (ml-kem/sha2/chacha20poly1305) is on rand_core 0.10;
+# `rand 0.10` matches it and is used only by `pq.rs`.
 rand = "0.10"
 thiserror.workspace = true
 async-trait.workspace = true
