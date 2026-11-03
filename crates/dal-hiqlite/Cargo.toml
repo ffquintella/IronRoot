@@ -16,7 +16,7 @@ description = "Hiqlite (Raft-backed embedded SQLite) integration for ironroot-da
 # small `DalError` / `ExecResult` shapes are duplicated, intentionally.
 
 [dependencies]
-hiqlite = { version = "0.14", default-features = false, features = ["sqlite"] }
+hiqlite = { version = "0.15", default-features = false, features = ["sqlite"] }
 thiserror.workspace = true
 tracing.workspace = true
 

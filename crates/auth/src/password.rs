@@ -1,8 +1,7 @@
 //! Argon2id-based password hashing.
 
 use argon2::{Algorithm, Argon2, Params, Version};
-use password_hash::{PasswordHash, PasswordHasher as _, PasswordVerifier, SaltString};
-use rand_core::OsRng;
+use password_hash::{PasswordHasher as _, PasswordVerifier};
 
 use crate::AuthError;
 
@@ -48,20 +47,18 @@ impl PasswordHasher {
 
     /// Hash a plain-text password into an Argon2id PHC string.
     pub fn hash(&self, password: &str) -> Result<String, AuthError> {
-        let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, self.params.clone());
         let hash = argon2
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password(password.as_bytes())
             .map_err(|e| AuthError::Hash(e.to_string()))?;
         Ok(hash.to_string())
     }
 
     /// Verify a plain-text password against a stored Argon2id PHC string.
     pub fn verify(&self, password: &str, phc: &str) -> Result<(), AuthError> {
-        let parsed = PasswordHash::new(phc).map_err(|e| AuthError::Hash(e.to_string()))?;
         let argon2 = Argon2::default();
         argon2
-            .verify_password(password.as_bytes(), &parsed)
+            .verify_password(password.as_bytes(), phc)
             .map_err(|_| AuthError::InvalidCredentials)
     }
 }
